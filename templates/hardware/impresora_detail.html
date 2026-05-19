@@ -1,0 +1,332 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Detalle de Impresora - {{ impresora.nombre }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-card {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.05);
+        border: none;
+        overflow: hidden;
+    }
+    .detail-header {
+        background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
+        padding: 3rem 2rem;
+        color: white;
+        position: relative;
+    }
+    .status-badge-detail {
+        position: absolute;
+        top: 2rem;
+        right: 2rem;
+        padding: 0.6rem 1.5rem;
+        border-radius: 50px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 0.75rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .stat-box {
+        background: #f8f9fc;
+        border-radius: 15px;
+        padding: 1.5rem;
+        text-align: center;
+        transition: transform 0.3s;
+    }
+    .stat-box:hover {
+        transform: translateY(-5px);
+        background: white;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+    }
+    .stat-value {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: #4e73df;
+        display: block;
+    }
+    .stat-label {
+        font-size: 0.7rem;
+        color: #858796;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 700;
+    }
+    .info-group {
+        margin-bottom: 1.5rem;
+    }
+    .info-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #b7b9cc;
+        text-transform: uppercase;
+        margin-bottom: 0.3rem;
+    }
+    .info-value {
+        font-weight: 600;
+        color: #2e3750;
+    }
+    .log-item {
+        padding: 1rem;
+        border-bottom: 1px solid #e3e6f0;
+        transition: background 0.2s;
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-item:hover { background: #f8f9fc; }
+    
+    .agent-config-card {
+        background: #f4f6ff;
+        border: 2px dashed #4e73df;
+        border-radius: 15px;
+        padding: 1.5rem;
+    }
+    .token-display {
+        font-family: 'Courier New', Courier, monospace;
+        background: #2e3750;
+        color: #00ff00;
+        padding: 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        word-break: break-all;
+        position: relative;
+    }
+    .copy-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: rgba(255,255,255,0.1);
+        border: none;
+        color: white;
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <!-- Breadcrumb & Actions -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-0">
+                <li class="breadcrumb-item"><a href="{% url 'hardware_integration:dashboard' %}">Hardware</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'hardware_integration:impresora_list' %}">Impresoras</a></li>
+                <li class="breadcrumb-item active">{{ impresora.nombre }}</li>
+            </ol>
+        </nav>
+        <div class="d-flex gap-2">
+            <a href="{% url 'hardware_integration:impresora_update' impresora.pk %}" class="btn btn-primary rounded-pill px-4">
+                <i class="fas fa-edit me-1"></i> Editar
+            </a>
+            <a href="{% url 'hardware_integration:impresora_test' impresora.pk %}" class="btn btn-info text-white rounded-pill px-4">
+                <i class="fas fa-vial me-1"></i> Realizar Test
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Columna Izquierda: Información General -->
+        <div class="col-lg-4">
+            <div class="detail-card h-100">
+                <div class="detail-header text-center">
+                    <span class="status-badge-detail {% if impresora.estado == 'ACTIVA' %}bg-success{% else %}bg-danger{% endif %} text-white">
+                        {{ impresora.get_estado_display }}
+                    </span>
+                    <div class="bg-white p-3 d-inline-block rounded-circle shadow-lg mb-3">
+                        <i class="fas fa-print fa-3x text-primary"></i>
+                    </div>
+                    <h3 class="fw-bold mb-1">{{ impresora.nombre }}</h3>
+                    <p class="mb-0 opacity-75">{{ impresora.get_tipo_impresora_display }}</p>
+                </div>
+                
+                <div class="card-body p-4">
+                    <div class="row g-3 mb-4">
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <span class="stat-value">{{ total_impresiones }}</span>
+                                <span class="stat-label">Impresiones</span>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <span class="stat-value">{{ impresora.ancho_papel }}mm</span>
+                                <span class="stat-label">Papel</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="fw-bold text-uppercase small mb-3 border-bottom pb-2">Parámetros Técnicos</h6>
+                    
+                    <div class="info-group">
+                        <div class="info-label">Conexión</div>
+                        <div class="info-value">{{ impresora.get_tipo_conexion_display }}</div>
+                    </div>
+                    
+                    <div class="info-group">
+                        <div class="info-label">Identificador Local</div>
+                        <div class="info-value text-primary fw-bold">{{ impresora.nombre_driver|default:impresora.nombre }}</div>
+                    </div>
+
+                    <div class="info-group">
+                        <div class="info-label">Protocolo</div>
+                        <div class="info-value">{{ impresora.get_protocolo_display }}</div>
+                    </div>
+
+                    {% if impresora.direccion_ip %}
+                    <div class="info-group">
+                        <div class="info-label">Dirección IP</div>
+                        <div class="info-value">{{ impresora.direccion_ip }}:{{ impresora.puerto_red }}</div>
+                    </div>
+                    {% endif %}
+
+                    <div class="mt-4">
+                        <h6 class="fw-bold text-uppercase small mb-3 border-bottom pb-2">Agente Local</h6>
+                        <div class="agent-config-card">
+                            <p class="small text-muted mb-3">Para que esta impresora funcione, el agente local debe estar autenticado.</p>
+                            
+                            {% if agent_token %}
+                            <div class="token-display mb-3">
+                                <button class="copy-btn" onclick="copyToken()"><i class="fas fa-copy"></i></button>
+                                <code id="tokenValue">{{ agent_token }}</code>
+                            </div>
+                            <p class="x-small text-info mb-0"><i class="fas fa-shield-alt"></i> Token activo para el usuario de sistema.</p>
+                            {% else %}
+                            <div class="text-center py-2">
+                                <form method="post" action="{% url 'hardware_integration:impresora_generate_token' impresora.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-outline-primary btn-sm rounded-pill w-100">
+                                        <i class="fas fa-key me-1"></i> Generar Token de Agente
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Logs y Estadísticas -->
+        <div class="col-lg-8">
+            <!-- Historial Reciente -->
+            <div class="detail-card mb-4">
+                <div class="card-header bg-white p-4 border-0 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0"><i class="fas fa-history text-primary me-2"></i> Historial de Impresión</h5>
+                    <span class="badge bg-light text-primary rounded-pill">Últimos 20 registros</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th class="ps-4">Fecha/Hora</th>
+                                    <th>Documento</th>
+                                    <th>Estado</th>
+                                    <th>Usuario</th>
+                                    <th class="text-end pe-4">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in ultimas_impresiones %}
+                                <tr>
+                                    <td class="ps-4">
+                                        <span class="fw-bold d-block">{{ log.fecha_impresion|date:"d/m/Y" }}</span>
+                                        <span class="text-muted small">{{ log.fecha_impresion|date:"H:i" }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-soft-primary text-primary">{{ log.tipo_documento }}</span>
+                                        {% if log.numero_documento %}<span class="ms-1 small text-muted">#{{ log.numero_documento }}</span>{% endif %}
+                                    </td>
+                                    <td>
+                                        {% if log.estado == 'COMPLETADO' %}
+                                            <span class="text-success small"><i class="fas fa-check-circle me-1"></i> Éxito</span>
+                                        {% elif log.estado == 'ERROR' %}
+                                            <span class="text-danger small" title="{{ log.mensaje_error }}"><i class="fas fa-times-circle me-1"></i> Error</span>
+                                        {% else %}
+                                            <span class="text-warning small"><i class="fas fa-spinner fa-spin me-1"></i> {{ log.estado }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="small">{{ log.usuario.username|default:"Sistema" }}</td>
+                                    <td class="text-end pe-4">
+                                        <button class="btn btn-sm btn-light rounded-circle"><i class="fas fa-info"></i></button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center py-5 text-muted">
+                                        <i class="fas fa-print fa-3x mb-3 opacity-25"></i>
+                                        <p class="mb-0">No hay registros de impresión todavía</p>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Distribución por Tipo -->
+            <div class="row g-4">
+                <div class="col-md-6">
+                    <div class="detail-card h-100">
+                        <div class="card-header bg-white p-4 border-0">
+                            <h5 class="fw-bold mb-0">Distribución por Tipo</h5>
+                        </div>
+                        <div class="card-body p-4 pt-0">
+                            {% for tipo in impresiones_por_tipo %}
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="small fw-bold">{{ tipo.tipo_documento }}</span>
+                                    <span class="small fw-bold">{{ tipo.cantidad }}</span>
+                                </div>
+                                <div class="progress" style="height: 6px;">
+                                    {% widthratio tipo.cantidad total_impresiones 100 as pct %}
+                                    <div class="progress-bar bg-primary" role="progressbar" style="width: {{ pct }}%"></div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="detail-card h-100">
+                        <div class="card-header bg-white p-4 border-0">
+                            <h5 class="fw-bold mb-0">Mantenimiento</h5>
+                        </div>
+                        <div class="card-body p-4 pt-0">
+                            <div class="p-3 rounded-4 bg-light text-center">
+                                <p class="small text-muted mb-2">Vida útil estimada del cabezal</p>
+                                <div class="stat-value text-dark mb-2">{{ total_impresiones }}/50k</div>
+                                <div class="progress mb-3" style="height: 10px;">
+                                    {% widthratio total_impresiones 50000 100 as pct %}
+                                    <div class="progress-bar bg-success" role="progressbar" style="width: {{ pct }}%"></div>
+                                </div>
+                                <a href="{% url 'hardware_integration:impresora_mantenimiento' impresora.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill w-100">
+                                    Registrar Mantenimiento
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function copyToken() {
+        const tokenText = document.getElementById('tokenValue').innerText;
+        navigator.clipboard.writeText(tokenText).then(() => {
+            const btn = document.querySelector('.copy-btn');
+            btn.innerHTML = '<i class="fas fa-check"></i>';
+            setTimeout(() => {
+                btn.innerHTML = '<i class="fas fa-copy"></i>';
+            }, 2000);
+        });
+    }
+</script>
+{% endblock %}

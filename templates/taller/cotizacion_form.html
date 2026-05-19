@@ -1,0 +1,913 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{% if object %}Editar{% else %}Nueva{% endif %} Cotización - VPMOTOS{% endblock %}
+
+{% block extra_css %}
+<!-- Google Fonts & Bootstrap Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.0/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+    /* ============================================================
+       1. VARIABLES Y BASE POS PREMIUM
+       ============================================================ */
+    :root {
+        --pos-primary: #4F46E5; /* Indigo 600 */
+        --pos-primary-hover: #4338CA;
+        --pos-success: #10B981;
+        --pos-danger: #EF4444;
+        --pos-warning: #F59E0B;
+        --pos-bg: #F3F5F9; /* Off-white premium */
+        --pos-surface: #FFFFFF;
+        --pos-border: #E5E7EB;
+        --pos-text-main: #111827;
+        --pos-text-muted: #6B7280;
+        --pos-card-radius: 16px;
+        --pos-font: 'Inter', sans-serif;
+    }
+
+    body { 
+        background-color: var(--pos-bg); 
+        font-family: var(--pos-font);
+        color: var(--pos-text-main);
+    }
+
+    /* Formularios Premium */
+    .form-control, .form-select {
+        border-radius: 12px;
+        border: 1px solid var(--pos-border);
+        background-color: #F9FAFB;
+        padding: 0.8rem 1rem;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+    }
+    .form-control:focus, .form-select:focus {
+        border-color: var(--pos-primary);
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        background-color: var(--pos-surface);
+        outline: none;
+    }
+    .input-group-text {
+        border-radius: 12px 0 0 12px;
+        border: 1px solid var(--pos-border);
+        border-right: none;
+        background-color: #F9FAFB;
+        color: var(--pos-text-muted);
+    }
+    .input-group .form-control {
+        border-radius: 0 12px 12px 0;
+        border-left: none;
+        padding-left: 0;
+    }
+    
+    label.small.fw-bold {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pos-text-muted);
+        margin-bottom: 0.5rem;
+        display: block;
+    }
+
+    /* ============================================================
+       2. ESTRUCTURA (MOBILE & DESKTOP)
+       ============================================================ */
+    
+    .pos-layout {
+        display: block;
+        padding: 15px;
+        padding-bottom: 120px;
+    }
+
+    .mobile-nav-tabs {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--pos-surface); display: flex; justify-content: space-around;
+        padding: 12px 0; box-shadow: 0 -4px 20px rgba(0,0,0,0.05);
+        z-index: 1050; border-top: 1px solid var(--pos-border);
+    }
+    
+    .m-tab-link {
+        flex: 1; display: flex; flex-direction: column; align-items: center;
+        text-decoration: none; color: var(--pos-text-muted); font-size: 0.7rem; font-weight: 600;
+        transition: all 0.2s;
+    }
+    .m-tab-link.active { color: var(--pos-primary); transform: translateY(-2px); }
+    .m-tab-link i { font-size: 1.4rem; margin-bottom: 4px; }
+
+    @media (max-width: 991px) {
+        .pos-section { display: none; }
+        .pos-section.active { display: block; animation: slideUp 0.3s ease; }
+    }
+
+    @keyframes slideUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* [VISTA DESKTOP] */
+    @media (min-width: 992px) {
+        .pos-layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 24px;
+            padding: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+            align-items: start;
+        }
+        .mobile-nav-tabs { display: none !important; }
+        .pos-section { display: block !important; margin-bottom: 24px; }
+        .btn-add-item-mobile { display: none !important; }
+        
+        #right-column-fixed { position: sticky; top: 30px; }
+
+        .total-panel-pos {
+            background: linear-gradient(135deg, #111827 0%, #1F2937 100%);
+            border-radius: var(--pos-card-radius);
+            padding: 2.5rem 2rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .total-panel-pos::after {
+            content: ''; position: absolute; top: 0; right: 0; width: 150px; height: 150px;
+            background: radial-gradient(circle, rgba(79, 70, 229, 0.3) 0%, transparent 70%);
+            border-radius: 50%; transform: translate(30%, -30%);
+        }
+    }
+
+    /* ============================================================
+       3. COMPONENTES BASE
+       ============================================================ */
+    
+    .pos-card {
+        background: var(--pos-surface); 
+        border-radius: var(--pos-card-radius);
+        border: 1px solid var(--pos-border); 
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        margin-bottom: 24px; 
+        transition: box-shadow 0.3s ease;
+    }
+    .pos-card:hover {
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+    }
+    
+    .pos-card-header {
+        padding: 1.25rem 1.5rem; 
+        border-bottom: 1px solid var(--pos-border);
+        display: flex; justify-content: space-between; align-items: center;
+        background-color: rgba(249, 250, 251, 0.5);
+        border-radius: var(--pos-card-radius) var(--pos-card-radius) 0 0;
+    }
+    .pos-card-header h6 { 
+        margin: 0; font-weight: 700; color: var(--pos-text-main); 
+        font-size: 1.05rem; display: flex; align-items: center;
+    }
+    .pos-card-header h6 i { color: var(--pos-primary); margin-right: 8px; font-size: 1.2rem; }
+    
+    .pos-card-body { padding: 1.5rem; }
+
+    /* Botones de acción Header */
+    .btn-action-pill {
+        border-radius: 50px;
+        padding: 0.4rem 1rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .btn-action-pill i { font-size: 0.9rem; }
+    .btn-action-svc { background: rgba(16, 185, 129, 0.1); color: #059669; border: 1px solid rgba(16, 185, 129, 0.2); }
+    .btn-action-svc:hover { background: rgba(16, 185, 129, 0.2); color: #047857; }
+    
+    .btn-action-prod { background: rgba(59, 130, 246, 0.1); color: #2563EB; border: 1px solid rgba(59, 130, 246, 0.2); }
+    .btn-action-prod:hover { background: rgba(59, 130, 246, 0.2); color: #1D4ED8; }
+    
+    .btn-action-custom { background: rgba(245, 158, 11, 0.1); color: #D97706; border: 1px solid rgba(245, 158, 11, 0.2); }
+    .btn-action-custom:hover { background: rgba(245, 158, 11, 0.2); color: #B45309; }
+
+    /* Items del Carrito */
+    .cart-items-container {
+        max-height: 400px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(0,0,0,0.2) transparent;
+    }
+    .cart-items-container::-webkit-scrollbar { width: 6px; }
+    .cart-items-container::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.2); border-radius: 10px; }
+
+    .cart-item-row {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--pos-border);
+        background: var(--pos-surface);
+        transition: background 0.2s;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    .cart-item-row:last-child { border-bottom: none; border-radius: 0 0 var(--pos-card-radius) var(--pos-card-radius); }
+    .cart-item-row:hover { background: #F9FAFB; }
+    
+    .item-info { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: flex-start; }
+    .item-name { font-weight: 600; color: var(--pos-text-main); font-size: 0.95rem; line-height: 1.2; margin-top: 4px; }
+    .item-remove { grid-column: 2; grid-row: 1; text-align: right; }
+    
+    .item-controls { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 10px; }
+    .item-totals { grid-column: 2; grid-row: 2; text-align: right; }
+    
+    /* Insignias premium */
+    .badge-pos {
+        padding: 0.35rem 0.6rem;
+        border-radius: 6px;
+        font-weight: 700;
+        font-size: 0.65rem;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        margin-bottom: 6px;
+    }
+    .badge-servicio { background: rgba(59, 130, 246, 0.1); color: #2563EB; border: 1px solid rgba(59, 130, 246, 0.2); }
+    .badge-repuesto { background: rgba(16, 185, 129, 0.1); color: #059669; border: 1px solid rgba(16, 185, 129, 0.2); }
+
+    /* Stepper Moderno */
+    .qty-stepper {
+        display: inline-flex; align-items: center; background: var(--pos-surface);
+        border-radius: 8px; padding: 4px; border: 1px solid var(--pos-border);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    }
+    .qty-btn {
+        width: 28px; height: 28px; border-radius: 6px; border: none;
+        background: #F3F4F6; color: var(--pos-text-main); font-weight: bold;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; transition: all 0.1s;
+    }
+    .qty-btn:hover { background: #E5E7EB; }
+    .qty-btn:active { transform: scale(0.95); }
+    .qty-input {
+        width: 40px; border: none; background: transparent;
+        text-align: center; font-weight: 600; color: var(--pos-text-main); font-size: 0.95rem;
+    }
+    .qty-input:focus { outline: none; }
+
+    /* Precios */
+    .unit-price-label { font-size: 0.8rem; color: var(--pos-text-muted); font-weight: 500; }
+    .price-display { font-size: 1.25rem; font-weight: 700; color: var(--pos-success); }
+    .price-display.text-dark { color: var(--pos-text-main) !important; }
+
+    /* Panel de Totales */
+    .total-panel-pos {
+        background: linear-gradient(135deg, #111827 0%, #1F2937 100%); color: white;
+        padding: 2rem; border-radius: var(--pos-card-radius); text-align: center;
+        margin-bottom: 24px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    .total-label { font-size: 0.85rem; font-weight: 600; opacity: 0.7; letter-spacing: 1px; text-transform: uppercase; }
+    .total-amount { font-size: 3rem; font-weight: 800; margin-top: 5px; letter-spacing: -1px; }
+
+    /* Botones principales */
+    .btn-save-pos {
+        background: linear-gradient(135deg, var(--pos-success) 0%, #059669 100%);
+        border: none; color: white; font-weight: 700; font-size: 1.1rem;
+        padding: 1.2rem; border-radius: 12px;
+        box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.3);
+        transition: all 0.3s ease;
+        display: flex; justify-content: center; align-items: center;
+    }
+    .btn-save-pos:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4); color: white; }
+    
+    .btn-new-client {
+        background: var(--pos-primary);
+        color: white; border: none; font-weight: 600;
+        border-radius: 8px; padding: 0.5rem 1rem;
+        font-size: 0.85rem; transition: all 0.2s;
+    }
+    .btn-new-client:hover { background: var(--pos-primary-hover); color: white; transform: translateY(-1px); }
+
+    /* Layout para detalles de vehículo */
+    .vehicle-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px;
+    }
+
+    /* Modales */
+    .modal-content { border-radius: var(--pos-card-radius); border: none; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+    .modal-header { border-bottom: 1px solid var(--pos-border); padding: 1.5rem; }
+    .modal-header h5 { font-weight: 700; font-size: 1.2rem; margin: 0; }
+    .modal-body { padding: 1.5rem; }
+
+    @media (max-width: 991px) {
+        .modal.bottom-sheet .modal-dialog { position: fixed; margin: 0; width: 100%; bottom: 0; }
+        .modal.bottom-sheet .modal-content { border-radius: 20px 20px 0 0; border: none; }
+    }
+
+    .btn-add-item-mobile {
+        position: fixed; bottom: 85px; right: 20px;
+        width: 60px; height: 60px; border-radius: 30px;
+        background: var(--pos-primary); color: white;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.8rem; box-shadow: 0 8px 20px rgba(79, 70, 229, 0.4);
+        border: none; z-index: 1040; transition: transform 0.2s;
+    }
+    .btn-add-item-mobile:active { transform: scale(0.95); }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="post" id="pos-quotation-form">
+    {% csrf_token %}
+    
+    <div class="container-fluid px-0 px-lg-4">
+        {% if form.errors or items.errors %}
+        <div class="alert alert-danger border-0 shadow-sm mb-4 rounded-4 py-3 px-4" role="alert">
+            <div class="d-flex">
+                <i class="bi bi-exclamation-octagon-fill fs-4 me-3"></i>
+                <div>
+                    <h6 class="alert-heading fw-bold mb-1">Hay errores en la cotización:</h6>
+                    <ul class="mb-0 small ps-3">
+                        {% for field in form %}
+                            {% for error in field.errors %}
+                                <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                            {% endfor %}
+                        {% endfor %}
+                        {% for error in form.non_field_errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                        {% for dict in items.errors %}
+                            {% for field, error_list in dict.items %}
+                                {% for error in error_list %}
+                                    <li>Item {{ forloop.parentloop.parentloop.counter }}: {{ error }}</li>
+                                {% endfor %}
+                            {% endfor %}
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- BARRA DE NAVEGACIÓN MÓVIL -->
+    <div class="mobile-nav-tabs" id="mobile-tabs">
+        <a href="#" class="m-tab-link active" data-target="section-info">
+            <i class="bi bi-file-earmark-text-fill"></i>
+            <span>DATOS</span>
+        </a>
+        <a href="#" class="m-tab-link" data-target="section-cart">
+            <i class="bi bi-tools"></i>
+            <span>ITEMS</span>
+        </a>
+        <a href="#" class="m-tab-link" data-target="section-actions">
+            <i class="bi bi-check-circle-fill"></i>
+            <span>TOTAL</span>
+        </a>
+    </div>
+
+    <div class="pos-layout">
+        <!-- COLUMNA PRINCIPAL -->
+        <div id="left-column-main">
+            <!-- Sección 1: Información -->
+            <div class="pos-section active" id="section-info">
+                <div class="pos-card">
+                    <div class="pos-card-header">
+                        <h6><i class="bi bi-person-lines-fill"></i> Información General</h6>
+                        <button type="button" class="btn-new-client" data-bs-toggle="modal" data-bs-target="#modalNuevoCliente">
+                            <i class="bi bi-plus-circle-fill me-1"></i> Nuevo Cliente
+                        </button>
+                    </div>
+                    <div class="pos-card-body">
+                        <div class="row g-4">
+                            <!-- Cliente -->
+                            <div class="col-lg-7 border-end-lg">
+                                <label class="small fw-bold mb-2"><i class="bi bi-person me-1"></i> CLIENTE</label>
+                                <div id="client-search-wrapper">
+                                    <div class="input-group mb-3 shadow-sm rounded-3">
+                                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                        <input type="text" id="id_cliente_identificacion" class="form-control" placeholder="Buscar cliente..." autocomplete="off">
+                                    </div>
+                                    <div id="client-results-list" class="list-group d-none shadow-sm rounded-3 border mb-3" style="max-height: 200px; overflow-y: auto;"></div>
+                                </div>
+
+                                <div id="client-selected-card" class="p-3 rounded-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 d-none mb-3">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h5 class="mb-0 fw-bold text-primary" id="display-client-name"></h5>
+                                        </div>
+                                        <button type="button" class="btn-close" onclick="resetClient()"></button>
+                                    </div>
+                                </div>
+
+                                <div class="d-none">
+                                    {{ form.cliente }}
+                                </div>
+                                
+                                <div class="form-check form-switch mt-2">
+                                    <input class="form-check-input" type="checkbox" id="switch-manual-client">
+                                    <label class="form-check-label small fw-bold text-muted ms-1" for="switch-manual-client">Manual / No registrado</label>
+                                </div>
+                                <div id="manual-client-form" class="mt-2 d-none">
+                                    {{ form.nombre_cliente_manual }}
+                                </div>
+                            </div>
+                            
+                            <!-- Vehículo -->
+                            <div class="col-lg-5">
+                                <label class="small fw-bold mb-2"><i class="bi bi-bicycle me-1"></i> VEHÍCULO</label>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        {{ form.moto_placa }}
+                                    </div>
+                                    <div class="col-md-6">
+                                        {{ form.moto_marca }}
+                                    </div>
+                                    <div class="col-12 mt-2">
+                                        {{ form.moto_modelo }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección 2: Carrito -->
+            <div class="pos-section" id="section-cart">
+                <div class="pos-card">
+                    <div class="pos-card-header">
+                        <h6><i class="bi bi-list-check"></i> Items Seleccionados</h6>
+                        <div class="d-flex gap-2 flex-wrap justify-content-end">
+                            <button type="button" class="btn-action-pill btn-action-svc" data-bs-toggle="modal" data-bs-target="#modalServicios"><i class="bi bi-tools"></i> Servicios</button>
+                            <button type="button" class="btn-action-pill btn-action-prod" data-bs-toggle="modal" data-bs-target="#modalProductos"><i class="bi bi-box-seam"></i> Repuestos</button>
+                            <button type="button" class="btn-action-pill btn-action-custom" data-bs-toggle="modal" data-bs-target="#modalPersonalizado"><i class="bi bi-star-fill"></i> Personalizado</button>
+                        </div>
+                    </div>
+                    <div id="pos-items-container" class="cart-items-container">
+                        {{ items.management_form }}
+                        {% for item_form in items %}
+                        <div class="cart-item-row">
+                            {% for hidden in item_form.hidden_fields %}
+                                {{ hidden }}
+                            {% endfor %}
+                            <div class="item-info">
+                                <span class="badge-pos {% if item_form.tipo.value == 'SERVICIO' %}badge-servicio{% else %}badge-repuesto{% endif %} text-uppercase">{{ item_form.tipo.value }}</span>
+                                <div class="item-name">{{ item_form.descripcion.value|default:"Nuevo Item" }}</div>
+                                <div class="d-none">{{ item_form.tipo }}{{ item_form.descripcion }}</div>
+                            </div>
+                            <div class="item-remove">
+                                <button type="button" class="btn text-danger btn-sm border-0 btn-remove-pos-item p-1" title="Eliminar"><i class="bi bi-trash fs-5"></i></button>
+                                <div class="d-none">
+                                    {% if items.can_delete %}
+                                        {{ item_form.DELETE }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="item-controls">
+                                <div class="qty-stepper">
+                                    <button type="button" class="qty-btn btn-minus"><i class="bi bi-dash"></i></button>
+                                    {{ item_form.cantidad }}
+                                    <button type="button" class="qty-btn btn-plus"><i class="bi bi-plus"></i></button>
+                                </div>
+                                <div class="unit-price-label">P.U: $<span class="val-unit-price">{{ item_form.precio_unitario.value }}</span></div>
+                                <div class="d-none">{{ item_form.precio_unitario }}</div>
+                            </div>
+                            <div class="item-totals">
+                                <div class="price-display display-total-item">$0.00</div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div id="cart-empty-message" class="text-center py-5 {% if items.total_form_count > 0 %}d-none{% endif %}">
+                        <div class="mb-3">
+                            <i class="bi bi-cart text-muted opacity-25" style="font-size: 3rem;"></i>
+                        </div>
+                        <h6 class="fw-bold text-muted">Aún no hay items</h6>
+                        <p class="text-muted small">Agrega servicios, repuestos o items personalizados a la cotización.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- COLUMNA DERECHA -->
+        <div id="right-column-fixed">
+            <div class="pos-section" id="section-actions">
+                <div class="total-panel-pos">
+                    <div class="total-label">TOTAL ESTIMADO</div>
+                    <div class="total-amount" id="grand-total-display">$0.00</div>
+                </div>
+
+                <div class="pos-card">
+                    <div class="pos-card-body">
+                        <div class="mb-3">
+                            <label class="small fw-bold">VALIDEZ (DÍAS)</label>
+                            {{ form.validez_dias }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="small fw-bold">ESTADO</label>
+                            {{ form.estado }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="small fw-bold">OBSERVACIONES</label>
+                            {{ form.observaciones }}
+                        </div>
+                        <button type="submit" class="btn-save-pos w-100">
+                            <i class="bi bi-check-circle-fill me-2"></i> GUARDAR COTIZACIÓN
+                        </button>
+                        <div class="text-center mt-3">
+                            <a href="{% url 'taller:cotizacion_list' %}" class="text-muted text-decoration-none fw-semibold small hover-primary">Cancelar y volver</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTÓN FLOTANTE MÓVIL -->
+    <button type="button" class="btn-add-item-mobile" data-bs-toggle="modal" data-bs-target="#modalServicios">
+        <i class="bi bi-plus-lg"></i>
+    </button>
+</form>
+
+<!-- MODALES -->
+<div class="modal fade bottom-sheet" id="modalServicios" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="text-primary"><i class="bi bi-tools me-2"></i>AÑADIR SERVICIO</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group mb-4 shadow-sm rounded-3">
+                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <input type="text" class="form-control border-start-0 ps-0" id="search-svc-input" placeholder="Buscar servicio...">
+                </div>
+                <div id="svc-ajax-list" class="list-group list-group-flush rounded-3 border" style="max-height: 50vh; overflow-y: auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade bottom-sheet" id="modalProductos" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="text-success"><i class="bi bi-box-seam me-2"></i>AÑADIR REPUESTO</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group mb-4 shadow-sm rounded-3">
+                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <input type="text" class="form-control border-start-0 ps-0" id="search-prod-input" placeholder="Buscar repuesto...">
+                </div>
+                <div id="prod-ajax-list" class="list-group list-group-flush rounded-3 border" style="max-height: 50vh; overflow-y: auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade bottom-sheet" id="modalPersonalizado" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="text-warning text-dark"><i class="bi bi-star-fill me-2"></i>ITEM PERSONALIZADO</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">TIPO DE ITEM</label>
+                    <select class="form-select shadow-sm" id="custom-item-type">
+                        <option value="SERVICIO">Servicio</option>
+                        <option value="REPUESTO">Repuesto</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">DESCRIPCIÓN</label>
+                    <input type="text" class="form-control shadow-sm" id="custom-item-desc" placeholder="Ej. Cambio de aceite especial">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-bold">PRECIO UNITARIO ($)</label>
+                    <div class="input-group shadow-sm rounded-3">
+                        <span class="input-group-text">$</span>
+                        <input type="number" step="0.01" class="form-control" id="custom-item-price" placeholder="0.00">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-warning w-100 fw-bold py-3 text-dark shadow-sm" id="btn-add-custom-item" style="border-radius: 12px;">
+                    <i class="bi bi-plus-circle-fill me-2"></i>AGREGAR A COTIZACIÓN
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL NUEVO CLIENTE -->
+<div class="modal fade" id="modalNuevoCliente" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="text-primary"><i class="bi bi-person-plus-fill me-2"></i>CREAR NUEVO CLIENTE</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="nuevo-cliente-error" class="alert alert-danger d-none py-2 px-3 small"></div>
+                <form id="form-nuevo-cliente">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">TIPO ID</label>
+                            <select class="form-select shadow-sm" id="nc-tipo-id" required>
+                                <option value="CEDULA">Cédula</option>
+                                <option value="RUC">RUC</option>
+                                <option value="PASAPORTE">Pasaporte</option>
+                                <option value="OTRO">Otro</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small fw-bold">IDENTIFICACIÓN</label>
+                            <input type="text" class="form-control shadow-sm" id="nc-identificacion" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">NOMBRES</label>
+                            <input type="text" class="form-control shadow-sm" id="nc-nombres" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">APELLIDOS</label>
+                            <input type="text" class="form-control shadow-sm" id="nc-apellidos" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">TELÉFONO / CELULAR</label>
+                            <input type="text" class="form-control shadow-sm" id="nc-telefono">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">EMAIL</label>
+                            <input type="email" class="form-control shadow-sm" id="nc-email">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">DIRECCIÓN</label>
+                            <input type="text" class="form-control shadow-sm" id="nc-direccion">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 fw-bold py-3 mt-4 shadow-sm" style="border-radius: 12px;">
+                        <span class="spinner-border spinner-border-sm d-none me-2" id="nc-spinner" role="status" aria-hidden="true"></span>
+                        <i class="bi bi-save2 me-2" id="nc-icon"></i>GUARDAR Y SELECCIONAR CLIENTE
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TEMPLATE DE FILA -->
+<div id="pos-row-template" class="d-none">
+    <div class="cart-item-row">
+        <input type="hidden" name="items-__prefix__-id" id="id_items-__prefix__-id">
+        <div class="item-info">
+            <span class="badge-pos badge-type-indicator text-uppercase">TIPO</span>
+            <div class="item-name display-name">Nombre</div>
+            <div class="d-none">
+                <input type="hidden" name="items-__prefix__-tipo">
+                <input type="hidden" name="items-__prefix__-descripcion">
+            </div>
+        </div>
+        <div class="item-remove">
+            <button type="button" class="btn text-danger btn-sm border-0 btn-remove-pos-item p-1" title="Eliminar"><i class="bi bi-trash fs-5"></i></button>
+            <input type="checkbox" class="d-none" name="items-__prefix__-DELETE">
+        </div>
+        
+        <div class="item-controls">
+            <div class="qty-stepper">
+                <button type="button" class="qty-btn btn-minus"><i class="bi bi-dash"></i></button>
+                <input type="number" name="items-__prefix__-cantidad" step="any" class="qty-input" value="1">
+                <button type="button" class="qty-btn btn-plus"><i class="bi bi-plus"></i></button>
+            </div>
+            <div class="unit-price-label">P.U: $<span class="val-unit-price">0.00</span></div>
+            <div class="d-none">
+                <input type="hidden" name="items-__prefix__-precio_unitario">
+            </div>
+        </div>
+        <div class="item-totals">
+            <div class="price-display display-total-item text-dark">$0.00</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // --- NAVEGACIÓN MÓVIL ---
+        $('.m-tab-link').click(function(e) {
+            e.preventDefault();
+            var target = $(this).data('target');
+            $('.m-tab-link').removeClass('active');
+            $(this).addClass('active');
+            $('.pos-section').removeClass('active');
+            $('#' + target).addClass('active');
+            window.scrollTo(0, 0);
+        });
+
+        // --- GESTIÓN DE ITEMS ---
+        var totalForms = $('#id_items-TOTAL_FORMS');
+        var container = $('#pos-items-container');
+        var template = $('#pos-row-template').html();
+
+        function addPosItem(tipo, desc, precio) {
+            $('#cart-empty-message').addClass('d-none');
+            var idx = totalForms.val();
+            var html = template.replace(/__prefix__/g, idx);
+            var $item = $(html);
+            
+            $item.find('.badge-type-indicator').text(tipo).addClass(tipo === 'SERVICIO' ? 'bg-info' : 'bg-primary');
+            $item.find('.display-name').text(desc);
+            $item.find('.val-unit-price').text(parseFloat(precio).toFixed(2));
+            
+            $item.find('input[name$="-tipo"]').val(tipo);
+            $item.find('input[name$="-descripcion"]').val(desc);
+            $item.find('input[name$="-precio_unitario"]').val(precio);
+            
+            container.append($item);
+            totalForms.val(parseInt(idx) + 1);
+            bindPosEvents($item);
+            recalculatePOS();
+        }
+
+        function bindPosEvents($row) {
+            $row.find('.btn-plus').click(function() {
+                var $in = $(this).siblings('input');
+                $in.val(parseFloat($in.val() || 0) + 1).trigger('change');
+            });
+            $row.find('.btn-minus').click(function() {
+                var $in = $(this).siblings('input');
+                var v = parseFloat($in.val() || 0);
+                if (v > 1) $in.val(v - 1).trigger('change');
+            });
+            $row.find('.btn-remove-pos-item').click(function() {
+                var $it = $(this).closest('.cart-item-row');
+                var del = $it.find('input[name$="-DELETE"]');
+                if (del.length) { del.prop('checked', true); $it.addClass('d-none'); } else { $it.remove(); }
+                recalculatePOS();
+            });
+            $row.find('input').on('change keyup', recalculatePOS);
+        }
+
+        function recalculatePOS() {
+            var grandTotal = 0;
+            $('.cart-item-row:not(.d-none)').each(function() {
+                var q = parseFloat($(this).find('input[name$="-cantidad"]').val()) || 0;
+                var p = parseFloat($(this).find('input[name$="-precio_unitario"]').val()) || 0;
+                var sub = q * p;
+                $(this).find('.display-total-item').text('$' + sub.toFixed(2));
+                grandTotal += sub;
+            });
+            $('#grand-total-display').text('$' + grandTotal.toLocaleString('en-US', {minimumFractionDigits: 2}));
+            if ($('.cart-item-row:not(.d-none)').length === 0) $('#cart-empty-message').removeClass('d-none');
+        }
+
+        // --- AJAX CATALOGS ---
+        function loadAjaxServices(q) {
+            var $l = $('#svc-ajax-list'); $l.html('<div class="p-4 text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>');
+            $.getJSON("{% url 'ventas:api_servicios' %}?t=" + Date.now(), { q: q || '' }, function(res) {
+                $l.empty();
+                if (res.success && res.servicios.length) {
+                    res.servicios.forEach(function(i) {
+                        $l.append('<a href="#" class="list-group-item list-group-item-action select-btn" data-tipo="SERVICIO" data-name="'+i.nombre+'" data-price="'+i.precio+'">' +
+                            '<div class="d-flex justify-content-between align-items-center"><div><div class="fw-bold">'+i.nombre+'</div><div class="small text-muted">'+(i.categoria||'')+'</div></div><div class="fw-bold text-primary">$'+parseFloat(i.precio).toFixed(2)+'</div></div>' +
+                            '</a>');
+                    });
+                } else { $l.html('<p class="p-3 text-center text-muted small">No se encontraron servicios</p>'); }
+            });
+        }
+
+        function loadAjaxProducts(q) {
+            var $l = $('#prod-ajax-list'); $l.html('<div class="p-4 text-center"><div class="spinner-border spinner-border-sm text-success"></div></div>');
+            $.getJSON("{% url 'taller:buscar_producto_ajax' %}?t=" + Date.now(), { q: q || '' }, function(data) {
+                $l.empty();
+                if (data && data.length) {
+                    data.forEach(function(i) {
+                        $l.append('<a href="#" class="list-group-item list-group-item-action select-btn" data-tipo="REPUESTO" data-name="'+i.nombre+'" data-price="'+i.precio+'">' +
+                            '<div class="d-flex justify-content-between align-items-center"><div><div class="fw-bold">'+i.nombre+'</div><div class="small text-muted">Stock: '+i.stock+'</div></div><div class="fw-bold text-success">$'+parseFloat(i.precio).toFixed(2)+'</div></div>' +
+                            '</a>');
+                    });
+                } else { $l.html('<p class="p-3 text-center text-muted small">No se encontraron repuestos</p>'); }
+            });
+        }
+
+        $(document).on('click', '.select-btn', function(e) {
+            e.preventDefault();
+            addPosItem($(this).data('tipo'), $(this).data('name'), $(this).data('price'));
+            $(this).closest('.modal').modal('hide');
+        });
+
+        $('#search-svc-input').on('keyup', function() { loadAjaxServices($(this).val()); });
+        $('#search-prod-input').on('keyup', function() { loadAjaxProducts($(this).val()); });
+        $('#modalServicios').on('shown.bs.modal', function() { loadAjaxServices(''); });
+        $('#modalProductos').on('shown.bs.modal', function() { loadAjaxProducts(''); });
+
+        // --- CUSTOM ITEMS ---
+        $('#btn-add-custom-item').click(function() {
+            var type = $('#custom-item-type').val();
+            var desc = $('#custom-item-desc').val().trim();
+            var price = parseFloat($('#custom-item-price').val()) || 0;
+            if(desc === "") {
+                alert("Debe ingresar una descripción para el item personalizado.");
+                return;
+            }
+            addPosItem(type, desc, price);
+            $('#custom-item-desc').val('');
+            $('#custom-item-price').val('');
+            $('#modalPersonalizado').modal('hide');
+        });
+
+        // --- CLIENTS ---
+        $('#id_cliente_identificacion').on('input', function() {
+            var q = $(this).val();
+            if (q.length >= 2) {
+                $.getJSON("{% url 'taller:buscar_cliente_ajax' %}", { q: q }, function(data) {
+                    var $res = $('#client-results-list'); $res.empty().removeClass('d-none');
+                    data.forEach(function(i) { $res.append('<div class="list-group-item list-group-item-action p-3 cli-click" style="cursor:pointer" data-id="'+i.id+'" data-name="'+i.nombres+' '+i.apellidos+'"><div class="fw-bold">'+i.nombres+' '+i.apellidos+'</div><div class="small text-muted">'+i.identificacion+'</div></div>'); });
+                });
+            } else { $('#client-results-list').addClass('d-none'); }
+        });
+
+        $(document).on('click', '.cli-click', function() {
+            $('#id_cliente').val($(this).data('id'));
+            $('#display-client-name').text($(this).data('name'));
+            $('#client-selected-card').removeClass('d-none');
+            $('#client-search-wrapper, #client-results-list').addClass('d-none');
+        });
+
+        $('#switch-manual-client').change(function() { $('#manual-client-form').toggleClass('d-none', !this.checked); });
+
+        // --- CREAR CLIENTE RÁPIDO ---
+        $('#form-nuevo-cliente').on('submit', function(e) {
+            e.preventDefault();
+            var $btn = $(this).find('button[type="submit"]');
+            var $spinner = $('#nc-spinner');
+            var $icon = $('#nc-icon');
+            var $error = $('#nuevo-cliente-error');
+            
+            $btn.prop('disabled', true);
+            $spinner.removeClass('d-none');
+            $icon.addClass('d-none');
+            $error.addClass('d-none');
+            
+            var payload = {
+                tipo_identificacion: $('#nc-tipo-id').val(),
+                identificacion: $('#nc-identificacion').val(),
+                nombres: $('#nc-nombres').val(),
+                apellidos: $('#nc-apellidos').val(),
+                telefono: $('#nc-telefono').val(),
+                email: $('#nc-email').val(),
+                direccion: $('#nc-direccion').val()
+            };
+            
+            $.ajax({
+                url: "{% url 'clientes:api_crear_cliente_rapido' %}",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify(payload),
+                headers: {
+                    "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $('#modalNuevoCliente').modal('hide');
+                        $('#form-nuevo-cliente')[0].reset();
+                        
+                        // Seleccionar el cliente recién creado
+                        $('#id_cliente').val(response.cliente.id);
+                        $('#display-client-name').text(response.cliente.nombre_completo);
+                        $('#client-selected-card').removeClass('d-none');
+                        $('#client-search-wrapper, #client-results-list').addClass('d-none');
+                    } else {
+                        $error.text(response.mensaje).removeClass('d-none');
+                    }
+                },
+                error: function(xhr, errmsg, err) {
+                    $error.text("Error al procesar la solicitud. Intente nuevamente.").removeClass('d-none');
+                },
+                complete: function() {
+                    $btn.prop('disabled', false);
+                    $spinner.addClass('d-none');
+                    $icon.removeClass('d-none');
+                }
+            });
+        });
+
+        // INIT
+        $('.cart-item-row').each(function() { bindPosEvents($(this)); });
+        recalculatePOS();
+    });
+
+    function resetClient() {
+        $('#id_cliente').val('');
+        $('#display-client-name').text('');
+        $('#client-selected-card').addClass('d-none');
+        $('#client-search-wrapper').removeClass('d-none');
+        $('#id_cliente_identificacion').val('').focus();
+    }
+</script>
+{% endblock %}

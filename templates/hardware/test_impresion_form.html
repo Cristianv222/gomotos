@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Prueba de Impresión - VPMOTOS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .test-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        overflow: hidden;
+        border: none;
+    }
+    .test-header {
+        background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
+        color: white;
+        padding: 2rem;
+    }
+    .test-body {
+        padding: 2rem;
+    }
+    .printer-preview {
+        background: #f8f9fc;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        border-left: 5px solid #4e73df;
+    }
+    .option-card {
+        border: 2px solid #e3e6f0;
+        border-radius: 12px;
+        padding: 1.5rem;
+        cursor: pointer;
+        transition: all 0.3s;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+    .option-card:hover {
+        border-color: #4e73df;
+        background: rgba(78, 115, 223, 0.05);
+        transform: translateY(-5px);
+    }
+    .option-card i {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        color: #b7b9cc;
+    }
+    .form-check-input:checked + .option-card {
+        border-color: #4e73df;
+        background: rgba(78, 115, 223, 0.1);
+    }
+    .form-check-input:checked + .option-card i {
+        color: #4e73df;
+    }
+    .form-check-input:checked + .option-card .fw-bold {
+        color: #4e73df;
+    }
+    .hidden-radio {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="test-card">
+                <div class="test-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h2 class="h3 mb-1"><i class="fas fa-vial me-2"></i> Diagnóstico de Impresión</h2>
+                            <p class="mb-0 opacity-75">Verifica el funcionamiento de tu hardware</p>
+                        </div>
+                        <a href="{% url 'hardware_integration:impresora_list' %}" class="btn btn-light btn-sm rounded-pill px-3">
+                            <i class="fas fa-arrow-left me-1"></i> Volver
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="test-body">
+                    <div class="printer-preview">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <div class="bg-white p-3 rounded-circle shadow-sm">
+                                    <i class="fas fa-print fa-2x text-primary"></i>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <h4 class="mb-1 fw-bold">{{ impresora.nombre }}</h4>
+                                <div class="d-flex gap-3 small text-muted">
+                                    <span><i class="fas fa-tag me-1"></i> {{ impresora.get_tipo_impresora_display }}</span>
+                                    <span><i class="fas fa-link me-1"></i> {{ impresora.get_tipo_conexion_display }}</span>
+                                    <span><i class="fas fa-align-left me-1"></i> {{ impresora.ancho_papel }}mm</span>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <span class="badge {% if impresora.estado == 'ACTIVA' %}bg-success{% else %}bg-danger{% endif %} rounded-pill px-3">
+                                    {{ impresora.get_estado_display }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form method="post">
+                        {% csrf_token %}
+                        <h5 class="fw-bold mb-4">1. Selecciona el tipo de prueba</h5>
+                        
+                        <div class="row g-4 mb-5">
+                            {% for radio in form.tipo_prueba %}
+                            <div class="col-md-4">
+                                <label class="w-100 h-100 m-0">
+                                    <input type="radio" name="{{ radio.data.name }}" value="{{ radio.data.value }}" class="hidden-radio" {% if radio.data.selected %}checked{% endif %}>
+                                    <div class="option-card shadow-sm">
+                                        {% if radio.data.value == 'PAGINA' %}
+                                            <i class="fas fa-file-invoice"></i>
+                                        {% elif radio.data.value == 'TICKET' %}
+                                            <i class="fas fa-receipt"></i>
+                                        {% elif radio.data.value == 'ETIQUETA' %}
+                                            <i class="fas fa-barcode"></i>
+                                        {% endif %}
+                                        <div class="fw-bold">{{ radio.choice_label }}</div>
+                                        <p class="small text-muted mt-2 mb-0">
+                                            {% if radio.data.value == 'PAGINA' %}
+                                                Verifica alineación, fuentes y corte básico.
+                                            {% elif radio.data.value == 'TICKET' %}
+                                                Simula una venta real con productos y totales.
+                                            {% elif radio.data.value == 'ETIQUETA' %}
+                                                Prueba de impresión de código de barras.
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="alert alert-info border-0 shadow-sm rounded-3 d-flex align-items-center mb-4">
+                            <i class="fas fa-info-circle fa-2x me-3"></i>
+                            <div>
+                                <h6 class="alert-heading fw-bold mb-1">Información importante</h6>
+                                <p class="mb-0 small">Asegúrate de que la impresora tenga papel cargado y el agente local de CommerceBox esté en ejecución.</p>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg py-3 fw-bold rounded-3 shadow-sm">
+                                <i class="fas fa-paper-plane me-2"></i> Enviar Trabajo a Impresora
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="text-center mt-4">
+                <p class="text-muted small">¿Problemas con la impresión? <a href="#" class="text-decoration-none">Consulta la guía de solución de problemas</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.querySelectorAll('.option-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const radio = this.previousElementSibling;
+            radio.checked = true;
+            
+            // Update styles
+            document.querySelectorAll('.option-card').forEach(c => c.classList.remove('active-card'));
+            this.classList.add('active-card');
+        });
+    });
+</script>
+{% endblock %}

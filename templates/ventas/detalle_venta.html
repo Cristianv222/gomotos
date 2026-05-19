@@ -1,0 +1,620 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Detalle de Venta - VPMOTOS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .detail-header {
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .status-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 25px;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+    }
+
+    .status-completada {
+        background: rgba(39, 174, 96, 0.1);
+        color: #27ae60;
+        border: 2px solid #27ae60;
+    }
+
+    .status-anulada {
+        background: rgba(231, 76, 60, 0.1);
+        color: #e74c3c;
+        border: 2px solid #e74c3c;
+    }
+
+    .detail-info {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .info-label {
+        font-weight: 600;
+        color: #666;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .info-value {
+        font-size: 1.1rem;
+        color: #2c3e50;
+        font-weight: 500;
+    }
+
+    .total-amount {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #27ae60;
+    }
+
+    .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+    }
+
+    .items-table th {
+        background: #f8f9fa;
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: #2c3e50;
+        border-bottom: 2px solid #e9ecef;
+    }
+
+    .items-table td {
+        padding: 1rem;
+        border-bottom: 1px solid #e9ecef;
+        vertical-align: middle;
+    }
+
+    .items-table tr:hover {
+        background: rgba(52, 152, 219, 0.05);
+    }
+
+    .item-type {
+        padding: 0.25rem 0.75rem;
+        border-radius: 15px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+
+    .type-producto {
+        background: rgba(243, 156, 18, 0.1);
+        color: #f39c12;
+    }
+
+    .type-servicio {
+        background: rgba(52, 152, 219, 0.1);
+        color: #3498db;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-action {
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        border: none;
+        font-weight: 600;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+
+    .btn-primary {
+        background: #3498db;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #2980b9;
+        color: white;
+        text-decoration: none;
+    }
+
+    .btn-success {
+        background: #27ae60;
+        color: white;
+    }
+
+    .btn-success:hover {
+        background: #229954;
+        color: white;
+        text-decoration: none;
+    }
+
+    .btn-danger {
+        background: #e74c3c;
+        color: white;
+    }
+
+    .btn-danger:hover {
+        background: #c0392b;
+        color: white;
+        text-decoration: none;
+    }
+
+    .btn-secondary {
+        background: #95a5a6;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #7f8c8d;
+        color: white;
+        text-decoration: none;
+    }
+
+    .totals-section {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 2rem;
+    }
+
+    .total-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .total-row:last-child {
+        border-bottom: none;
+        border-top: 2px solid #3498db;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+    }
+
+    @media (max-width: 768px) {
+        .detail-info {
+            grid-template-columns: 1fr;
+        }
+
+        .action-buttons {
+            flex-direction: column;
+        }
+
+        .items-table {
+            font-size: 0.9rem;
+        }
+
+        .items-table th,
+        .items-table td {
+            padding: 0.75rem 0.5rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Header -->
+    <div class="detail-card">
+        <div class="detail-header">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h2 class="mb-2">
+                        <i class="fas fa-receipt me-2"></i>
+                        Factura {{ venta.numero_factura }}
+                    </h2>
+                    <div class="status-badge status-{{ venta.estado|lower }}">
+                        {{ venta.get_estado_display }}
+                    </div>
+                </div>
+                <div class="action-buttons">
+                    <a href="{% url 'ventas:lista_ventas' %}" class="btn-action btn-secondary">
+                        <i class="fas fa-arrow-left"></i>
+                        Volver
+                    </a>
+                    {% if venta.estado == 'COMPLETADA' %}
+                    <a href="{% url 'ventas:factura_pdf' %}?id={{ venta.id }}" class="btn-action btn-primary" target="_blank">
+                        <i class="fas fa-file-pdf"></i>
+                        Descargar PDF
+                    </a>
+                    <button class="btn-action btn-success" onclick="imprimirVenta()">
+                        <i class="fas fa-print"></i>
+                        Imprimir
+                    </button>
+                    <a href="{% url 'ventas:devolucion_create' venta.id %}" class="btn-action" style="background: #f39c12; color: white;">
+                        <i class="fas fa-exchange-alt"></i>
+                        Devolución / Cambio
+                    </a>
+                    {% endif %}
+                    {% if venta.estado == 'COMPLETADA' %}
+                    <button class="btn-action btn-danger" onclick="anularVenta()">
+                        <i class="fas fa-ban"></i>
+                        Anular Venta
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Información de la Venta -->
+        <div class="detail-info">
+            <div class="info-item">
+                <div class="info-label">Cliente</div>
+                <div class="info-value">
+                    {% if venta.cliente.identificacion == '9999999999' %}
+                        Consumidor Final
+                    {% else %}
+                        {{ venta.cliente.nombres }} {{ venta.cliente.apellidos }}
+                        <br>
+                        <small class="text-muted">{{ venta.cliente.identificacion }}</small>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Fecha y Hora</div>
+                <div class="info-value">{{ venta.fecha_hora|date:"d/m/Y H:i" }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Método de Pago</div>
+                <div class="info-value">{{ venta.get_tipo_pago_display }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Vendedor</div>
+                <div class="info-value">{{ venta.usuario.get_full_name|default:venta.usuario.username }}</div>
+            </div>
+
+            <div class="info-item">
+                <div class="info-label">Total</div>
+                <div class="info-value total-amount">${{ venta.total|floatformat:2 }}</div>
+            </div>
+        </div>
+
+        {% if venta.observaciones %}
+        <div class="info-item">
+            <div class="info-label">Observaciones</div>
+            <div class="info-value">{{ venta.observaciones }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Detalles de la Venta -->
+    <div class="detail-card">
+        <h4 class="mb-3">
+            <i class="fas fa-list me-2"></i>
+            Detalles de la Venta
+        </h4>
+
+        <div class="table-responsive">
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Descripción</th>
+                        <th>Cantidad</th>
+                        <th>Precio Unit.</th>
+                        <th>Subtotal</th>
+                        <th>IVA</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for detalle in detalles %}
+                    <tr>
+                        <td>
+                            {% if detalle.producto %}
+                                <span class="item-type type-producto">Producto</span>
+                            {% else %}
+                                <span class="item-type type-servicio">Servicio</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <strong>
+                                {% if detalle.nombre_personalizado %}
+                                    {{ detalle.nombre_personalizado }}
+                                {% elif detalle.producto %}
+                                    {{ detalle.producto.nombre }}
+                                {% elif detalle.tipo_servicio %}
+                                    {{ detalle.tipo_servicio.nombre }}
+                                {% else %}
+                                    Item
+                                {% endif %}
+                            </strong>
+                            {% if detalle.producto %}
+                                <br><small class="text-muted">{{ detalle.producto.codigo_unico }}</small>
+                            {% endif %}
+                            {% if detalle.tecnico %}
+                                <br><small class="text-muted">Técnico: {{ detalle.tecnico.get_nombre_completo }}</small>
+                            {% endif %}
+                        </td>
+                        <td>{{ detalle.cantidad|floatformat:0 }}</td>
+                        <td>${{ detalle.precio_unitario|floatformat:2 }}</td>
+                        <td>${{ detalle.subtotal|floatformat:2 }}</td>
+                        <td>${{ detalle.iva|floatformat:2 }}</td>
+                        <td><strong>${{ detalle.total|floatformat:2 }}</strong></td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4">
+                            <i class="fas fa-inbox fa-2x text-muted mb-2"></i>
+                            <p class="text-muted">No hay detalles registrados</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Totales -->
+        <div class="totals-section">
+            <div class="total-row">
+                <span>Subtotal:</span>
+                <span>${{ venta.subtotal|floatformat:2 }}</span>
+            </div>
+            <div class="total-row">
+                <span>IVA (15%):</span>
+                <span>${{ venta.iva|floatformat:2 }}</span>
+            </div>
+            {% if venta.descuento %}
+            <div class="total-row">
+                <span>Descuento:</span>
+                <span>-${{ venta.descuento|floatformat:2 }}</span>
+            </div>
+            {% endif %}
+            <div class="total-row">
+                <span>TOTAL:</span>
+                <span>${{ venta.total|floatformat:2 }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Historial de Devoluciones -->
+    {% if venta.devoluciones.exists %}
+    <div class="detail-card border-top border-warning border-4">
+        <h4 class="mb-3 text-warning">
+            <i class="fas fa-exchange-alt me-2"></i>
+            Devoluciones y Cambios Asociados
+        </h4>
+        <div class="table-responsive">
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Fecha</th>
+                        <th>Atendido por</th>
+                        <th>Monto Devuelto</th>
+                        <th>Monto Nuevo</th>
+                        <th>Diferencia / Resultado</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for dev in venta.devoluciones.all %}
+                    <tr>
+                        <td><strong>DEV-{{ dev.id|stringformat:"06d" }}</strong></td>
+                        <td>{{ dev.fecha_hora|date:"d/m/Y H:i" }}</td>
+                        <td>{{ dev.usuario.get_full_name|default:dev.usuario.username }}</td>
+                        <td class="text-danger">-${{ dev.total_devuelto|floatformat:2 }}</td>
+                        <td class="text-success">+${{ dev.total_nuevo|floatformat:2 }}</td>
+                        <td>
+                            {% if dev.diferencia > 0 %}
+                                <span class="badge bg-success">Cobrado extra: ${{ dev.diferencia|floatformat:2 }}</span>
+                            {% elif dev.diferencia < 0 %}
+                                <span class="badge bg-danger">Reembolsado: ${{ dev.diferencia|stringformat:"f"|cut:"-"|floatformat:2 }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Cambio Exacto</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'ventas:devolucion_detail' dev.id %}" class="btn btn-sm btn-outline-primary">Ver Recibo</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+{% csrf_token %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let availablePrinters = [];
+
+async function loadPrinters() {
+    try {
+        const response = await fetch('/hardware/api/estado-impresoras/');
+        const data = await response.json();
+        if (data.success) {
+            availablePrinters = data.impresoras.filter(p => ['TICKET', 'TERMICA_80MM', 'TERMICA_58MM'].includes(p.tipo));
+        }
+    } catch (error) {
+        console.error('Error loading printers:', error);
+    }
+}
+
+async function imprimirVenta() {
+    await loadPrinters();
+    
+    let printerOptions = availablePrinters.map(p => 
+        `<option value="${p.id}">${p.nombre} (${p.identificador})</option>`
+    ).join('');
+
+    Swal.fire({
+        title: 'Opciones de Impresión',
+        html: `
+            <div class="text-start">
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="printType" id="printTicket" value="ticket" checked>
+                    <label class="form-check-label" for="printTicket">
+                        <i class="fas fa-receipt me-2"></i>Ticket Térmico (Servidor)
+                    </label>
+                </div>
+                
+                <div id="printer-selection" class="mb-3 ps-4">
+                    <label class="small text-muted mb-1">Seleccionar Impresora:</label>
+                    <select id="selectedPrinter" class="form-select form-select-sm">
+                        ${printerOptions || '<option value="">Ninguna impresora activa</option>'}
+                    </select>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="openDrawer" value="true" checked>
+                        <label class="form-check-label small" for="openDrawer">Abrir Gaveta</label>
+                    </div>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="printType" id="printInvoice" value="invoice">
+                    <label class="form-check-label" for="printInvoice">
+                        <i class="fas fa-file-pdf me-2"></i>Factura Completa (PDF)
+                    </label>
+                </div>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="radio" name="printType" id="printPreview" value="preview">
+                    <label class="form-check-label" for="printPreview">
+                        <i class="fas fa-eye me-2"></i>Vista Previa Ticket
+                    </label>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Imprimir',
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            const ticketRadio = document.getElementById('printTicket');
+            const previewRadio = document.getElementById('printPreview');
+            const printerDiv = document.getElementById('printer-selection');
+            
+            const updateVisibility = () => {
+                printerDiv.style.opacity = ticketRadio.checked ? '1' : '0.4';
+                document.getElementById('selectedPrinter').disabled = !ticketRadio.checked;
+                document.getElementById('openDrawer').disabled = !ticketRadio.checked;
+            };
+
+            document.querySelectorAll('input[name="printType"]').forEach(radio => {
+                radio.addEventListener('change', updateVisibility);
+            });
+        }
+    }).then(async (result) => {
+        if (result.isConfirmed) {
+            const printType = document.querySelector('input[name="printType"]:checked').value;
+            
+            if (printType === 'ticket') {
+                const printerId = document.getElementById('selectedPrinter').value;
+                const openDrawer = document.getElementById('openDrawer').checked;
+                
+                if (!printerId) {
+                    Swal.fire('Error', 'Debe seleccionar una impresora', 'error');
+                    return;
+                }
+
+                Swal.fire({
+                    title: 'Enviando a impresora...',
+                    didOpen: () => { Swal.showLoading(); }
+                });
+
+                try {
+                    const formData = new FormData();
+                    formData.append('id', '{{ venta.id }}');
+                    formData.append('impresora_id', printerId);
+                    formData.append('abrir_gaveta', openDrawer);
+                    formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+                    const response = await fetch('{% url "ventas:imprimir_ticket" %}', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        Swal.fire('Éxito', 'Impresión enviada correctamente', 'success');
+                    } else {
+                        Swal.fire('Error', data.message || 'Error desconocido', 'error');
+                    }
+                } catch (error) {
+                    Swal.fire('Error', 'Fallo de conexión con el servidor', 'error');
+                }
+            } else if (printType === 'preview') {
+                window.open('{% url "ventas:preview_ticket" venta.id %}', '_blank');
+            } else {
+                window.open('{% url "ventas:factura_pdf" %}?id={{ venta.id }}', '_blank');
+            }
+        }
+    });
+}
+
+function anularVenta() {
+    Swal.fire({
+        title: '¿Anular esta venta?',
+        text: 'Esta acción no se puede deshacer',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e74c3c',
+        cancelButtonColor: '#95a5a6',
+        confirmButtonText: 'Sí, anular',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Crear formulario para anular
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{% url "ventas:anular_venta" venta.id %}';
+            
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = csrfToken;
+            
+            form.appendChild(csrfInput);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    });
+}
+
+// Cargar SweetAlert2 si no está disponible
+if (typeof Swal === 'undefined') {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/sweetalert2@11';
+    document.head.appendChild(script);
+}
+</script>
+{% endblock %}

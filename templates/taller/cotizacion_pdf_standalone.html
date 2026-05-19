@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Cotización {{ cotizacion.numero_cotizacion }}</title>
+    <style>
+        body { font-family: 'Helvetica', 'Arial', sans-serif; color: #333; line-height: 1.5; font-size: 12px; margin: 0; padding: 0; }
+        .header { border-bottom: 2px solid #ff4b2b; padding-bottom: 20px; margin-bottom: 30px; }
+        .logo-container { float: left; width: 40%; }
+        .logo { max-height: 80px; }
+        .company-info { float: right; width: 55%; text-align: right; }
+        .company-name { font-size: 20px; font-weight: bold; color: #ff4b2b; margin-bottom: 5px; }
+        .document-title { font-size: 24px; font-weight: bold; text-align: center; margin: 20px 0; color: #333; clear: both; }
+        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        .info-box { background: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #eee; }
+        .label { font-weight: bold; color: #666; margin-bottom: 2px; text-transform: uppercase; font-size: 10px; }
+        .value { font-size: 13px; font-weight: bold; margin-bottom: 10px; }
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        .table th { background: #ff4b2b; color: white; padding: 10px; text-align: left; font-size: 11px; }
+        .table td { padding: 10px; border-bottom: 1px solid #eee; }
+        .table tr:nth-child(even) { background: #fafafa; }
+        .totals-container { float: right; width: 250px; background: #f8f9fa; padding: 15px; border-radius: 5px; }
+        .total-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .total-final { font-size: 18px; font-weight: bold; color: #ff4b2b; border-top: 1px solid #ddd; margin-top: 10px; padding-top: 10px; }
+        .footer { position: fixed; bottom: 0; width: 100%; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 10px; }
+        .clear { clear: both; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo-container">
+            {% if logo_base64 %}
+                <img src="{{ logo_base64 }}" class="logo">
+            {% else %}
+                <div class="company-name">{{ empresa.nombre }}</div>
+            {% endif %}
+        </div>
+        <div class="company-info">
+            <div class="company-name">{{ empresa.nombre }}</div>
+            <div>{{ empresa.direccion }}</div>
+            <div>Tel: {{ empresa.telefono }}</div>
+            <div>Email: {{ empresa.email }}</div>
+        </div>
+        <div class="clear"></div>
+    </div>
+
+    <div class="document-title">COTIZACIÓN #{{ cotizacion.numero_cotizacion }}</div>
+
+    <table class="info-grid">
+        <tr>
+            <td width="50%" style="padding-right: 10px;">
+                <div class="info-box">
+                    <div class="label">Cliente</div>
+                    <div class="value">{{ cotizacion.get_nombre_cliente }}</div>
+                    {% if cotizacion.cliente %}
+                    <div class="label">ID/Cédula</div>
+                    <div class="value">{{ cotizacion.cliente.identificacion }}</div>
+                    {% endif %}
+                </div>
+            </td>
+            <td width="50%" style="padding-left: 10px;">
+                <div class="info-box">
+                    <div class="label">Vehículo</div>
+                    <div class="value">{{ cotizacion.moto_marca|default:"-" }} {{ cotizacion.moto_modelo|default:"" }}</div>
+                    <div class="label">Placa / Fecha Emisión</div>
+                    <div class="value">{{ cotizacion.moto_placa|default:"N/A" }} | {{ cotizacion.fecha_emision|date:"d/m/Y" }}</div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th width="15%">TIPO</th>
+                <th width="45%">DESCRIPCIÓN</th>
+                <th width="10%" style="text-align: center;">CANT.</th>
+                <th width="15%" style="text-align: right;">P. UNIT</th>
+                <th width="15%" style="text-align: right;">TOTAL</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.get_tipo_display }}</td>
+                <td>{{ item.descripcion }}</td>
+                <td style="text-align: center;">{{ item.cantidad|floatformat:2 }}</td>
+                <td style="text-align: right;">${{ item.precio_unitario|floatformat:2 }}</td>
+                <td style="text-align: right; font-weight: bold;">${{ item.subtotal|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals-container">
+        <table width="100%">
+            <tr>
+                <td style="color: #666;">Subtotal:</td>
+                <td style="text-align: right; font-weight: bold;">${{ cotizacion.subtotal|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td style="color: #666;">IVA (0%):</td>
+                <td style="text-align: right; font-weight: bold;">$0.00</td>
+            </tr>
+            <tr class="total-final">
+                <td>TOTAL:</td>
+                <td style="text-align: right;">${{ cotizacion.total|floatformat:2 }}</td>
+            </tr>
+        </table>
+    </div>
+    <div class="clear"></div>
+
+    <div style="margin-top: 40px; border: 1px solid #eee; padding: 15px; border-radius: 5px; background: #fffcf5;">
+        <div class="label" style="color: #856404;">Términos y Condiciones</div>
+        <p style="margin-bottom: 0;">Esta cotización tiene una validez de <strong>{{ cotizacion.validez_dias }} días</strong> desde su fecha de emisión. Precios sujetos a cambios sin previo aviso según disponibilidad de repuestos.</p>
+    </div>
+
+    {% if cotizacion.observaciones %}
+    <div style="margin-top: 20px;">
+        <div class="label">Notas Adicionales</div>
+        <p>{{ cotizacion.observaciones }}</p>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        {{ empresa.nombre }} — Documento generado electrónicamente para fines informativos.
+    </div>
+</body>
+</html>

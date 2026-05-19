@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+
+{% block title %}Historial de Cotizaciones - VPMOTOS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .content-wrapper { padding: 1rem; }
+    .filters-container {
+        background: linear-gradient(135deg, var(--light) 0%, #f8f9fa 100%);
+        border-radius: var(--border-radius);
+        border: 1px solid var(--gray-200);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .quote-row {
+        cursor: pointer;
+        transition: var(--transition);
+        border-bottom: 1px solid var(--gray-200);
+    }
+    .quote-row:hover {
+        background-color: rgba(67, 97, 238, 0.05);
+        transform: translateX(5px);
+    }
+    .status-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .status-pendiente { background-color: rgba(255, 193, 7, 0.1); color: #856404; border: 1px solid rgba(255, 193, 7, 0.3); }
+    .status-aceptada { background-color: rgba(25, 135, 84, 0.1); color: #0f5132; border: 1px solid rgba(25, 135, 84, 0.3); }
+    .status-rechazada { background-color: rgba(220, 53, 69, 0.1); color: #842029; border: 1px solid rgba(220, 53, 69, 0.3); }
+    .status-expirada { background-color: rgba(108, 117, 125, 0.1); color: #495057; border: 1px solid rgba(108, 117, 125, 0.3); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h3 mb-0 text-gray-800"><i class="fas fa-file-invoice-dollar me-2 text-primary"></i>Historial de Cotizaciones</h2>
+            <p class="text-muted mb-0">Gestione sus cotizaciones independientes de forma rápida</p>
+        </div>
+        <a href="{% url 'taller:cotizacion_create' %}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i>Nueva Cotización
+        </a>
+    </div>
+
+    <!-- Filtros -->
+    <div class="filters-container shadow-sm">
+        <form method="get" class="row g-3">
+            <div class="col-md-10">
+                <div class="input-group">
+                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="search" class="form-control border-start-0" placeholder="Buscar por número, cliente o placa..." value="{{ request.GET.search }}">
+                </div>
+            </div>
+            <div class="col-md-2 d-grid">
+                <button type="submit" class="btn btn-secondary">Filtrar</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Tabla de Cotizaciones -->
+    <div class="card border-0 shadow-sm overflow-hidden">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-light text-dark">
+                    <tr>
+                        <th class="ps-4">Número</th>
+                        <th>Cliente</th>
+                        <th>Vehículo</th>
+                        <th>Fecha</th>
+                        <th>Total</th>
+                        <th>Estado</th>
+                        <th class="text-center pe-4">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cotizacion in cotizaciones %}
+                    <tr class="quote-row" onclick="window.location='{% url 'taller:cotizacion_detail' cotizacion.pk %}'">
+                        <td class="ps-4">
+                            <span class="fw-bold text-primary">{{ cotizacion.numero_cotizacion }}</span>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-column">
+                                <span class="fw-semibold text-dark">{{ cotizacion.get_nombre_cliente }}</span>
+                                {% if cotizacion.cliente %}
+                                <small class="text-muted"><i class="fas fa-id-card me-1"></i>{{ cotizacion.cliente.identificacion }}</small>
+                                {% else %}
+                                <small class="text-info"><i class="fas fa-user-tag me-1"></i>Cliente Manual</small>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if cotizacion.moto_placa %}
+                            <span class="badge bg-dark mb-1">{{ cotizacion.moto_placa }}</span><br>
+                            {% endif %}
+                            <small class="text-muted">{{ cotizacion.moto_marca|default:"" }} {{ cotizacion.moto_modelo|default:"" }}</small>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-column">
+                                <small class="fw-bold text-dark">{{ cotizacion.fecha_emision|date:"d M, Y" }}</small>
+                                <small class="text-muted">{{ cotizacion.fecha_emision|time:"H:i" }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="fw-bold text-success">${{ cotizacion.total|floatformat:2 }}</span>
+                        </td>
+                        <td>
+                            <span class="status-badge status-{{ cotizacion.estado|lower }}">
+                                {{ cotizacion.get_estado_display }}
+                            </span>
+                        </td>
+                        <td class="text-center pe-4" onclick="event.stopPropagation();">
+                            <div class="btn-group">
+                                <a href="{% url 'taller:cotizacion_detail' cotizacion.pk %}" class="btn btn-sm btn-outline-info" title="Ver Detalles">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'taller:generar_cotizacion_pdf_standalone' cotizacion.pk %}" class="btn btn-sm btn-outline-secondary" title="Descargar PDF">
+                                    <i class="fas fa-file-pdf"></i>
+                                </a>
+                                <a href="{% url 'taller:cotizacion_update' cotizacion.pk %}" class="btn btn-sm btn-outline-primary" title="Editar">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5">
+                            <div class="text-muted">
+                                <i class="fas fa-file-invoice-dollar fa-3x mb-3 opacity-25"></i>
+                                <p class="mb-0">No se encontraron cotizaciones.</p>
+                                <a href="{% url 'taller:cotizacion_create' %}" class="btn btn-link">Crear mi primera cotización</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        {% if is_paginated %}
+        <div class="card-footer bg-white border-0 py-3">
+            <nav aria-label="Navegación de páginas">
+                <ul class="pagination justify-content-center mb-0">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}">Anterior</a></li>
+                    {% endif %}
+                    <li class="page-item active"><span class="page-link">{{ page_obj.number }}</span></li>
+                    {% if page_obj.has_next %}
+                    <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if request.GET.search %}&search={{ request.GET.search }}{% endif %}">Siguiente</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

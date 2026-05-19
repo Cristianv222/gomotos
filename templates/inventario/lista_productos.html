@@ -1,0 +1,1079 @@
+{% extends 'base.html' %}
+
+{% block breadcrumb_page %}
+<li class="breadcrumb-item active">Productos</li>
+{% endblock %}
+
+{% block inventory_content %}
+<!-- Header con acciones principales -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h1 class="mb-0 fs-3"><i class="fas fa-boxes text-primary"></i> Inventario</h1>
+            <div class="d-none d-md-flex gap-2 flex-wrap">
+                <a href="{% url 'inventario:crear_producto' %}" class="btn btn-primary">
+                    <i class="fas fa-plus me-1"></i> Nuevo Producto
+                </a>
+                <a href="{% url 'inventario:transferencias_lista' %}" class="btn btn-secondary">
+                    <i class="fas fa-exchange-alt me-1"></i> Transferencias
+                </a>
+                <a href="{% url 'inventario:importar_productos' %}" class="btn btn-success">
+                    <i class="fas fa-file-upload me-1"></i> Importar
+                </a>
+                <a href="{% url 'inventario:exportar_productos' %}" class="btn btn-info text-white">
+                    <i class="fas fa-file-download me-1"></i> Exportar
+                </a>
+                <button type="button" class="btn btn-warning text-white" id="btnImprimirMasivo" data-bs-toggle="tooltip" title="Impresión rápida de etiquetas">
+                    <i class="fas fa-print me-1"></i> Etiquetas
+                </button>
+            </div>
+            
+            <!-- Botón desplegable para móviles (acciones principales) -->
+            <div class="dropdown d-md-none">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <i class="fas fa-ellipsis-v"></i> Opciones
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="{% url 'inventario:transferencias_lista' %}"><i class="fas fa-exchange-alt me-2 text-secondary"></i> Transferencias</a></li>
+                    <li><a class="dropdown-item" href="{% url 'inventario:importar_productos' %}"><i class="fas fa-file-upload me-2 text-success"></i> Importar</a></li>
+                    <li><a class="dropdown-item" href="{% url 'inventario:exportar_productos' %}"><i class="fas fa-file-download me-2 text-info"></i> Exportar</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" id="btnImprimirMasivoMobile"><i class="fas fa-print me-2 text-warning"></i> Etiquetas</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Botón Flotante para Móviles -->
+<a href="{% url 'inventario:crear_producto' %}" class="btn btn-primary btn-fab d-md-none shadow-lg">
+    <i class="fas fa-plus"></i>
+</a>
+
+<!-- Menú de navegación secundario -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="{% url 'inventario:lista_categorias' %}" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-folder me-1"></i> Categorías
+                        </a>
+                        <a href="{% url 'inventario:lista_marcas' %}" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-trademark me-1"></i> Marcas
+                        </a>
+                        <a href="{% url 'inventario:lista_ajustes' %}" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-balance-scale me-1"></i> Ajustes
+                        </a>
+                        <a href="{% url 'inventario:transferencias_lista' %}" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-exchange-alt me-1"></i> Transferencias
+                        </a>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="{% url 'inventario:exportar_productos_csv' %}" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-file-csv me-1"></i> CSV Completo
+                        </a>
+                        <a href="{% url 'inventario:csv_ejemplo' %}" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-download me-1"></i> Plantilla
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Estadísticas -->
+<div class="row mb-4 mobile-horizontal-scroll">
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-muted mb-1 small">Total Productos</p>
+                        <h3 class="mb-0 fw-bold">{{ estadisticas.total_productos }}</h3>
+                    </div>
+                    <div class="bg-primary bg-opacity-10 text-primary rounded p-3">
+                        <i class="fas fa-box fa-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-muted mb-1 small">Stock Bajo</p>
+                        <h3 class="mb-0 fw-bold text-warning">{{ estadisticas.productos_stock_bajo }}</h3>
+                    </div>
+                    <div class="bg-warning bg-opacity-10 text-warning rounded p-3">
+                        <i class="fas fa-exclamation-triangle fa-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-muted mb-1 small">Sin Stock</p>
+                        <h3 class="mb-0 fw-bold text-danger">{{ estadisticas.productos_sin_stock }}</h3>
+                    </div>
+                    <div class="bg-danger bg-opacity-10 text-danger rounded p-3">
+                        <i class="fas fa-times-circle fa-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-muted mb-1 small">Categorías</p>
+                        <h3 class="mb-0 fw-bold text-success">{{ estadisticas.categorias }}</h3>
+                    </div>
+                    <div class="bg-success bg-opacity-10 text-success rounded p-3">
+                        <i class="fas fa-tags fa-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-muted mb-1 small">Marcas</p>
+                        <h3 class="mb-0 fw-bold text-info">{{ estadisticas.marcas }}</h3>
+                    </div>
+                    <div class="bg-info bg-opacity-10 text-info rounded p-3">
+                        <i class="fas fa-trademark fa-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card border-0 shadow-sm h-100 border-primary border-2">
+            <div class="card-body">
+                <p class="text-muted mb-2 small">Acciones Rápidas</p>
+                <div class="d-flex gap-1 flex-wrap">
+                    <a href="{% url 'inventario:transferencias_lista' %}" class="btn btn-sm btn-secondary"
+                        data-bs-toggle="tooltip" title="Transferencias entre sucursales">
+                        <i class="fas fa-exchange-alt"></i>
+                    </a>
+                    <a href="{% url 'inventario:importar_productos' %}" class="btn btn-sm btn-success"
+                        data-bs-toggle="tooltip" title="Importar productos">
+                        <i class="fas fa-upload"></i>
+                    </a>
+                    <a href="{% url 'inventario:exportar_productos' %}" class="btn btn-sm btn-info text-white"
+                        data-bs-toggle="tooltip" title="Exportar productos">
+                        <i class="fas fa-download"></i>
+                    </a>
+                    <button type="button" class="btn btn-sm btn-warning text-white btn-imprimir-modal-masivo"
+                        data-bs-toggle="tooltip" title="Imprimir etiquetas">
+                        <i class="fas fa-print"></i>
+                    </button>
+                    <a href="{% url 'inventario:lista_ajustes' %}" class="btn btn-sm btn-dark"
+                        data-bs-toggle="tooltip" title="Ver ajustes">
+                        <i class="fas fa-sliders-h"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filtros -->
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-header bg-light">
+        <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="fas fa-filter text-primary me-2"></i> Filtros de Búsqueda
+            </h5>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                data-bs-target="#filtrosCollapse" aria-expanded="true">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+        </div>
+    </div>
+    <div class="collapse show" id="filtrosCollapse">
+        <div class="card-body">
+            <form method="get" id="searchForm">
+                <div class="row g-3">
+                    <div class="col-lg-4 col-md-6">
+                        <label for="{{ form.busqueda.id_for_label }}" class="form-label fw-semibold">
+                            <i class="fas fa-search text-primary me-1"></i> Buscar por nombre o código
+                        </label>
+                        {{ form.busqueda }}
+                    </div>
+                    <div class="col-lg-2 col-md-6">
+                        <label for="{{ form.categoria.id_for_label }}" class="form-label fw-semibold">
+                            <i class="fas fa-folder text-success me-1"></i> Categoría
+                        </label>
+                        {{ form.categoria }}
+                    </div>
+                    <div class="col-lg-2 col-md-6">
+                        <label for="{{ form.marca.id_for_label }}" class="form-label fw-semibold">
+                            <i class="fas fa-trademark text-info me-1"></i> Marca
+                        </label>
+                        {{ form.marca }}
+                    </div>
+                    <div class="col-lg-2 col-md-6">
+                        <label for="{{ form.activo.id_for_label }}" class="form-label fw-semibold">
+                            <i class="fas fa-toggle-on text-secondary me-1"></i> Estado
+                        </label>
+                        {{ form.activo }}
+                    </div>
+                    <div class="col-lg-2 col-md-12 d-flex align-items-end">
+                        <div class="form-check form-switch">
+                            {{ form.stock_bajo }}
+                            <label class="form-check-label fw-semibold" for="{{ form.stock_bajo.id_for_label }}">
+                                <i class="fas fa-exclamation-circle text-warning me-1"></i>
+                                Solo stock bajo
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary me-2">
+                            <i class="fas fa-search me-1"></i> Buscar
+                        </button>
+                        <a href="{% url 'inventario:lista_productos' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-times me-1"></i> Limpiar Filtros
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Tabla de Productos -->
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-light">
+        <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="fas fa-list text-primary me-2"></i> Listado de Productos
+            </h5>
+            <span class="badge bg-primary fs-6">{{ productos.paginator.count }} productos</span>
+        </div>
+    </div>
+    <div class="card-body p-0 p-md-3">
+        <!-- Vista Desktop: Tabla -->
+        <div class="table-responsive d-none d-md-block">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th width="10%">Código</th>
+                        <th width="8%">Imagen</th>
+                        <th width="20%">Nombre</th>
+                        <th width="12%">Categoría</th>
+                        <th width="12%">Marca</th>
+                        <th width="10%" class="text-end">P. Venta</th>
+                        <th width="8%" class="text-center">Stock</th>
+                        <th width="8%" class="text-center">Estado</th>
+                        <th width="12%" class="text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for producto in productos %}
+                    {% if producto.stock_actual == 0 %}
+                    <tr class="table-danger">
+                    {% elif producto.es_stock_bajo %}
+                    <tr class="table-warning">
+                    {% else %}
+                    <tr>
+                    {% endif %}
+                        <td>
+                            <code class="bg-light px-2 py-1 rounded">{{ producto.codigo_unico }}</code>
+                        </td>
+                        <td>
+                            {% if producto.imagen %}
+                            <img src="{{ producto.imagen.url }}" alt="{{ producto.nombre }}" class="img-thumbnail"
+                                style="width: 50px; height: 50px; object-fit: cover;">
+                            {% else %}
+                            <span class="text-muted small"><i class="fas fa-image fa-2x opacity-25"></i></span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div>
+                                <div class="fw-semibold text-dark">{{ producto.nombre }}</div>
+                                {% if producto.descripcion %}
+                                <small class="text-muted d-block">{{ producto.descripcion|truncatewords:10 }}</small>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge bg-success text-white">
+                                {{ producto.categoria.nombre }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-info text-white">
+                                {{ producto.marca.nombre }}
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <strong class="text-success fw-bold">${{ producto.precio_venta|floatformat:2 }}</strong>
+                        </td>
+                        <td class="text-center">
+                            {% if producto.stock_actual == 0 %}
+                            <span class="badge bg-danger text-white">
+                                <i class="fas fa-times me-1"></i>{{ producto.stock_actual }}
+                            </span>
+                            {% elif producto.es_stock_bajo %}
+                            <span class="badge bg-warning text-white">
+                                <i class="fas fa-exclamation-triangle me-1"></i>{{ producto.stock_actual }}
+                            </span>
+                            {% else %}
+                            <span class="badge bg-success text-white">
+                                {{ producto.stock_actual }}
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if producto.activo %}
+                            <span class="badge bg-success text-white">
+                                <i class="fas fa-check me-1"></i>Activo
+                            </span>
+                            {% else %}
+                            <span class="badge bg-danger text-white">
+                                <i class="fas fa-times me-1"></i>Inactivo
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <a href="{% url 'inventario:detalle_producto' producto.id %}"
+                                    class="btn btn-info text-white" title="Ver detalles" data-bs-toggle="tooltip">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'inventario:editar_producto' producto.id %}" class="btn btn-primary"
+                                    title="Editar" data-bs-toggle="tooltip">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <a href="{% url 'inventario:crear_ajuste' %}?producto_id={{ producto.id }}"
+                                    class="btn btn-warning text-white" title="Ajustar stock" data-bs-toggle="tooltip">
+                                    <i class="fas fa-sliders-h"></i>
+                                </a>
+                                <button type="button" class="btn btn-warning text-white btn-imprimir-etiqueta"
+                                    data-producto-id="{{ producto.id }}"
+                                    data-producto-nombre="{{ producto.nombre }}"
+                                    title="Imprimir etiquetas" data-bs-toggle="tooltip">
+                                    <i class="fas fa-print"></i>
+                                </button>
+                                <button type="button"
+                                    class="btn btn-{% if producto.activo %}danger{% else %}success{% endif %} btn-toggle-estado"
+                                    data-producto-id="{{ producto.id }}"
+                                    data-producto-nombre="{{ producto.nombre }}"
+                                    data-estado-actual="{{ producto.activo|yesno:'true,false' }}"
+                                    title="{% if producto.activo %}Desactivar{% else %}Activar{% endif %}"
+                                    data-bs-toggle="tooltip">
+                                    <i class="fas {% if producto.activo %}fa-times{% else %}fa-check{% endif %}"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5">
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-box-open fa-4x mb-3 opacity-25"></i>
+                                <h5>No se encontraron productos</h5>
+                                <p class="mb-3">Intenta ajustar los filtros de búsqueda</p>
+                                <a href="{% url 'inventario:crear_producto' %}" class="btn btn-primary">
+                                    <i class="fas fa-plus me-1"></i> Crear Primer Producto
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Vista Móvil: Tarjetas Nativas -->
+        <div class="d-md-none p-3">
+            {% for producto in productos %}
+            <div class="mobile-product-card {% if producto.stock_actual == 0 %}stock-zero{% elif producto.es_stock_bajo %}stock-low{% else %}stock-ok{% endif %}">
+                <div class="mp-header">
+                    <div class="mp-image">
+                        {% if producto.imagen %}
+                        <img src="{{ producto.imagen.url }}" alt="{{ producto.nombre }}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">
+                        {% else %}
+                        <i class="fas fa-box"></i>
+                        {% endif %}
+                    </div>
+                    <div class="mp-info">
+                        <h4 class="mp-title">{{ producto.nombre }}</h4>
+                        <span class="mp-code">{{ producto.codigo_unico }}</span>
+                        <div class="mp-badges">
+                            <span class="mp-badge bg-primary bg-opacity-10 text-primary">{{ producto.categoria.nombre|truncatechars:12 }}</span>
+                            <span class="mp-badge bg-secondary bg-opacity-10 text-secondary">{{ producto.marca.nombre|truncatechars:10 }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mp-stats">
+                    <div class="mp-stat">
+                        <span class="mp-stat-label">Precio</span>
+                        <span class="mp-stat-value mp-price">${{ producto.precio_venta|floatformat:2 }}</span>
+                    </div>
+                    <div class="mp-stat mp-stat-right">
+                        <span class="mp-stat-label">Stock</span>
+                        <span class="mp-stat-value {% if producto.stock_actual == 0 %}text-danger{% elif producto.es_stock_bajo %}text-warning{% else %}text-success{% endif %}">
+                            {{ producto.stock_actual }}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="mp-actions">
+                    <a href="{% url 'inventario:detalle_producto' producto.id %}" class="mp-btn bg-info bg-opacity-10 text-info">
+                        <i class="fas fa-eye"></i>
+                    </a>
+                    <a href="{% url 'inventario:editar_producto' producto.id %}" class="mp-btn bg-primary bg-opacity-10 text-primary">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    <a href="{% url 'inventario:crear_ajuste' %}?producto_id={{ producto.id }}" class="mp-btn bg-warning bg-opacity-10 text-warning">
+                        <i class="fas fa-sliders-h"></i>
+                    </a>
+                    <button type="button" class="mp-btn bg-warning bg-opacity-10 text-warning btn-imprimir-etiqueta border-0"
+                            data-producto-id="{{ producto.id }}"
+                            data-producto-nombre="{{ producto.nombre }}">
+                        <i class="fas fa-print"></i>
+                    </button>
+                    <button type="button" class="mp-btn bg-{% if producto.activo %}danger{% else %}success{% endif %} bg-opacity-10 text-{% if producto.activo %}danger{% else %}success{% endif %} btn-toggle-estado border-0"
+                            data-producto-id="{{ producto.id }}"
+                            data-producto-nombre="{{ producto.nombre }}"
+                            data-estado-actual="{{ producto.activo|yesno:'true,false' }}">
+                        <i class="fas {% if producto.activo %}fa-power-off{% else %}fa-check{% endif %}"></i>
+                    </button>
+                </div>
+            </div>
+            {% empty %}
+            <div class="text-center py-5">
+                <i class="fas fa-box-open fa-3x text-muted opacity-25 mb-3"></i>
+                <h6>No se encontraron productos</h6>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Paginación -->
+    {% if productos.has_other_pages %}
+    <div class="card-footer bg-light">
+        <div class="row align-items-center">
+            <div class="col-md-6 text-center text-md-start mb-2 mb-md-0">
+                <small class="text-muted">
+                    Mostrando <strong>{{ productos.start_index }}</strong> a
+                    <strong>{{ productos.end_index }}</strong> de
+                    <strong>{{ productos.paginator.count }}</strong> productos
+                </small>
+            </div>
+            <div class="col-md-6">
+                <nav aria-label="Paginación">
+                    <ul class="pagination justify-content-center justify-content-md-end mb-0">
+                        {% if productos.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link"
+                                href="?page=1{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+                                <i class="fas fa-angle-double-left"></i>
+                            </a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link"
+                                href="?page={{ productos.previous_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+                                <i class="fas fa-angle-left"></i>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link"><i class="fas fa-angle-double-left"></i></span>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link"><i class="fas fa-angle-left"></i></span>
+                        </li>
+                        {% endif %}
+
+                        {% for i in productos.paginator.page_range %}
+                        {% if productos.number == i %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ i }}</span>
+                        </li>
+                        {% elif i > productos.number|add:"-3" and i < productos.number|add:"3" %}
+                        <li class="page-item">
+                            <a class="page-link"
+                                href="?page={{ i }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+                                {{ i }}
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+
+                        {% if productos.has_next %}
+                        <li class="page-item">
+                            <a class="page-link"
+                                href="?page={{ productos.next_page_number }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+                                <i class="fas fa-angle-right"></i>
+                            </a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link"
+                                href="?page={{ productos.paginator.num_pages }}{% for key, value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+                                <i class="fas fa-angle-double-right"></i>
+                            </a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled">
+                            <span class="page-link"><i class="fas fa-angle-right"></i></span>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link"><i class="fas fa-angle-double-right"></i></span>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal de Confirmación -->
+<div class="modal fade" id="modalToggleEstado" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                    Confirmar Acción
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="modalToggleEstadoTexto" class="mb-0"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i> Cancelar
+                </button>
+                <form method="post" id="formToggleEstado" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary" id="btnConfirmarToggle">
+                        <i class="fas fa-check me-1"></i> Confirmar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Impresión de Etiquetas Premium -->
+<div class="modal fade" id="modalImprimirEtiquetas" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-2xl glass-modal overflow-hidden">
+            <div class="modal-header border-0 bg-gradient-warning text-white p-4">
+                <div class="d-flex align-items-center">
+                    <div class="icon-box bg-white bg-opacity-20 rounded-circle p-2 me-3">
+                        <i class="fas fa-print fs-4"></i>
+                    </div>
+                    <div>
+                        <h5 class="modal-title fw-bold mb-0">Impresión de Etiquetas</h5>
+                        <small class="opacity-75" id="modalImprimirEtiquetasSubtitulo">Configuración rápida</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body p-4">
+                <div class="product-preview mb-4 p-3 rounded-3 bg-light border border-dashed text-center">
+                    <p id="modalImprimirEtiquetasTexto" class="mb-0 fw-bold text-dark fs-5"></p>
+                    <span class="badge bg-soft-warning text-warning mt-2" id="previewBadge">Vista previa de impresión</span>
+                </div>
+                
+                <div class="quantity-selector-container">
+                    <label class="form-label fw-bold text-muted small text-uppercase tracking-wider mb-3">Cantidad de Tickets</label>
+                    <div class="d-flex align-items-center justify-content-center gap-3">
+                        <button class="btn btn-premium-circle" type="button" id="btnRestarEtiqueta">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <div class="quantity-input-wrapper">
+                            <input type="number" class="form-control-premium text-center" id="inputCantidadEtiquetas" value="1" min="1" max="100">
+                        </div>
+                        <button class="btn btn-premium-circle" type="button" id="btnSumarEtiqueta">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="printAlert" class="alert-premium d-none mt-4 animate__animated animate__fadeInUp"></div>
+            </div>
+            
+            <div class="modal-footer border-0 p-4 bg-light bg-opacity-50">
+                <button type="button" class="btn btn-link text-muted text-decoration-none fw-semibold me-auto" data-bs-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-gradient-warning text-white px-5 py-2 fw-bold shadow-sm" id="btnConfirmarImpresion">
+                    <span id="btnTextImpresion">Imprimir Ahora</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block inventory_js %}
+<script>
+    $(document).ready(function () {
+        // ==================== TOOLTIPS ====================
+        $('[data-bs-toggle="tooltip"]').tooltip();
+
+        // ==================== FILTROS AUTOMÁTICOS ====================
+        $('#id_categoria, #id_marca, #id_activo').on('change', function () {
+            $('#searchForm').submit();
+        });
+
+        // ==================== CONFIRMACIÓN DE ACTIVAR/DESACTIVAR ====================
+        $('.btn-toggle-estado').on('click', function (e) {
+            e.preventDefault();
+
+            const productoId = $(this).data('producto-id');
+            const productoNombre = $(this).data('producto-nombre');
+            const estadoActual = $(this).data('estado-actual') === 'true';
+
+            const accion = estadoActual ? 'desactivar' : 'activar';
+            const textoModal = `¿Estás seguro que deseas <strong>${accion}</strong> el producto "<strong>${productoNombre}</strong>"?`;
+
+            $('#modalToggleEstadoTexto').html(textoModal);
+            $('#formToggleEstado').attr('action', `/inventario/producto/${productoId}/activar/`);
+
+            const $btnConfirmar = $('#btnConfirmarToggle');
+            $btnConfirmar.removeClass('btn-danger btn-success')
+                .addClass(estadoActual ? 'btn-danger' : 'btn-success')
+                .html(`<i class="fas fa-${estadoActual ? 'times' : 'check'} me-1"></i>${accion.charAt(0).toUpperCase() + accion.slice(1)}`);
+
+            new bootstrap.Modal(document.getElementById('modalToggleEstado')).show();
+        });
+
+        // ==================== ANIMACIÓN EN CARDS ====================
+        $('.card').hover(
+            function () { $(this).addClass('shadow-lg').css('transform', 'translateY(-2px)'); },
+            function () { $(this).removeClass('shadow-lg').css('transform', 'translateY(0)'); }
+        );
+        // ==================== IMPRESIÓN DE ETIQUETAS ====================
+        let currentProductoId = null;
+        const modalImprimir = new bootstrap.Modal(document.getElementById('modalImprimirEtiquetas'));
+
+        $('.btn-imprimir-etiqueta').on('click', function() {
+            currentProductoId = $(this).data('producto-id');
+            const nombre = $(this).data('producto-nombre');
+            
+            $('#modalImprimirEtiquetasTexto').text(`Imprimir para: ${nombre}`);
+            $('#inputCantidadEtiquetas').val(1);
+            $('#printAlert').addClass('d-none');
+            $('#btnConfirmarImpresion').prop('disabled', false);
+            $('#btnTextImpresion').text('Imprimir');
+            
+            modalImprimir.show();
+        });
+
+        $('#btnSumarEtiqueta').on('click', function() {
+            const val = parseInt($('#inputCantidadEtiquetas').val());
+            if (val < 100) $('#inputCantidadEtiquetas').val(val + 1);
+        });
+
+        $('#btnRestarEtiqueta').on('click', function() {
+            const val = parseInt($('#inputCantidadEtiquetas').val());
+            if (val > 1) $('#inputCantidadEtiquetas').val(val - 1);
+        });
+
+        $('#btnConfirmarImpresion').on('click', function() {
+            ejecutarImpresion();
+        });
+
+        $('#inputCantidadEtiquetas').on('keypress', function(e) {
+            if (e.which === 13) {
+                ejecutarImpresion();
+            }
+        });
+
+        function ejecutarImpresion() {
+            const cantidad = $('#inputCantidadEtiquetas').val();
+            const $btn = $('#btnConfirmarImpresion');
+            const $alert = $('#printAlert');
+
+            $btn.prop('disabled', true);
+            $('#btnTextImpresion').html('<i class="fas fa-circle-notch fa-spin me-2"></i> Procesando...');
+            
+            $.ajax({
+                url: `/inventario/imprimir-etiqueta-rapida/${currentProductoId}/`,
+                method: 'POST',
+                data: {
+                    'cantidad': cantidad,
+                    'csrfmiddlewaretoken': '{{ csrf_token }}'
+                },
+                success: function(response) {
+                    $alert.removeClass('d-none alert-danger').addClass('alert-success d-flex align-items-center')
+                          .html('<i class="fas fa-check-circle fs-4 me-3"></i> <div><strong>¡Excelente!</strong><br>' + response.message + '</div>');
+                    
+                    $('#btnTextImpresion').html('<i class="fas fa-check me-2"></i>¡Enviado!');
+                    $btn.addClass('btn-success').removeClass('btn-gradient-warning');
+                    
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 },
+                        colors: ['#ffc107', '#ffca2c', '#ffffff']
+                    });
+
+                    setTimeout(() => {
+                        modalImprimir.hide();
+                        $btn.prop('disabled', false).removeClass('btn-success').addClass('btn-gradient-warning');
+                        $('#btnTextImpresion').text('Imprimir Ahora');
+                    }, 2500);
+                },
+                error: function(xhr) {
+                    const errorMsg = xhr.responseJSON ? xhr.responseJSON.error : 'Error desconocido';
+                    $alert.removeClass('d-none alert-success').addClass('alert-danger d-flex align-items-center')
+                          .html('<i class="fas fa-exclamation-circle fs-4 me-3"></i> <div><strong>Ups...</strong><br>' + errorMsg + '</div>');
+                    $btn.prop('disabled', false);
+                    $('#btnTextImpresion').text('Reintentar');
+                }
+            });
+        }
+
+        $('.btn-imprimir-modal-masivo, #btnImprimirMasivo').on('click', function() {
+            Swal.fire({
+                title: 'Información',
+                text: 'Para impresión masiva, por favor use los filtros de búsqueda y luego seleccione los productos deseados (Función en desarrollo). Por ahora, use el botón de impresión individual en cada fila.',
+                icon: 'info'
+            });
+        });
+    });
+</script>
+
+<style>
+    /* ===== ESTILOS PREMIUM & GLASSMORPHISM ===== */
+    .glass-modal {
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(15px);
+        -webkit-backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .bg-gradient-warning {
+        background: linear-gradient(135deg, #ff9800 0%, #ffc107 100%);
+    }
+
+    .bg-soft-warning {
+        background-color: rgba(255, 193, 7, 0.15);
+    }
+
+    .btn-premium-circle {
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: white;
+        border: 2px solid #eee;
+        color: #555;
+        transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .btn-premium-circle:hover {
+        transform: scale(1.1);
+        background: #ffc107;
+        color: white;
+        border-color: #ffc107;
+        box-shadow: 0 5px 15px rgba(255, 193, 7, 0.3);
+    }
+
+    .quantity-input-wrapper {
+        width: 100px;
+    }
+
+    .form-control-premium {
+        border: none;
+        background: #f8f9fa;
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: #212529;
+        padding: 0;
+        height: auto;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+    }
+
+    .form-control-premium:focus {
+        background: #ffffff;
+        box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.1);
+        outline: none;
+    }
+
+    /* Quitar flechas del input number */
+    .form-control-premium::-webkit-inner-spin-button,
+    .form-control-premium::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .btn-gradient-warning {
+        background: linear-gradient(135deg, #ff9800 0%, #ffc107 100%);
+        border: none;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+
+    .btn-gradient-warning:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(255, 152, 0, 0.3);
+    }
+
+    .alert-premium {
+        padding: 1rem;
+        border-radius: 12px;
+        font-size: 0.95rem;
+    }
+
+    .alert-success.alert-premium {
+        background-color: rgba(40, 167, 69, 0.1);
+        border: 1px solid rgba(40, 167, 69, 0.2);
+        color: #1e7e34;
+    }
+
+    .alert-danger.alert-premium {
+        background-color: rgba(220, 53, 69, 0.1);
+        border: 1px solid rgba(220, 53, 69, 0.2);
+        color: #bd2130;
+    }
+
+    .product-preview {
+        border-style: dashed !important;
+        border-width: 2px !important;
+        background: #fffbef !important;
+    }
+
+    .tracking-wider {
+        letter-spacing: 0.05em;
+    }
+
+    /* Animaciones Generales */
+    .card {
+        transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+    }
+
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 30px rgba(0,0,0,0.08) !important;
+    }
+
+    .table tr {
+        transition: transform 0.2s ease;
+    }
+
+    .table tr:hover {
+        transform: scale(1.002);
+    }
+    /* Floating Action Button (FAB) */
+    .btn-fab {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        z-index: 1050;
+        background: var(--primary);
+        color: white;
+        transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    .btn-fab:hover {
+        transform: scale(1.1) rotate(90deg);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.19);
+        color: white;
+    }
+
+    /* Mobile specific adjustments */
+    @media (max-width: 768px) {
+        .mobile-horizontal-scroll {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scroll-snap-type: x mandatory;
+            padding-bottom: 10px;
+        }
+        
+        .mobile-horizontal-scroll > div {
+            flex: 0 0 240px;
+            scroll-snap-align: center;
+        }
+
+        .mobile-horizontal-scroll::-webkit-scrollbar {
+            height: 4px;
+        }
+        
+        .mobile-horizontal-scroll::-webkit-scrollbar-thumb {
+            background-color: var(--gray-300);
+            border-radius: 4px;
+        }
+    }
+
+    /* Mobile Product Cards - COMPACT */
+    .mobile-product-card {
+        background: white;
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        border: 1px solid var(--gray-200);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .mobile-product-card.stock-zero {
+        border-left: 4px solid var(--danger);
+    }
+    
+    .mobile-product-card.stock-low {
+        border-left: 4px solid var(--warning);
+    }
+
+    .mobile-product-card.stock-ok {
+        border-left: 4px solid var(--success);
+    }
+
+    .mp-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+        gap: 10px;
+    }
+
+    .mp-image {
+        width: 48px;
+        height: 48px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: var(--gray-100);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--gray-400);
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .mp-info {
+        flex-grow: 1;
+        min-width: 0;
+    }
+
+    .mp-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--gray-900);
+        margin: 0 0 2px 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mp-code {
+        font-family: monospace;
+        background: var(--gray-100);
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 11px;
+        color: var(--gray-600);
+    }
+
+    .mp-badges {
+        display: flex;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .mp-badge {
+        font-size: 9px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    .mp-stats {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-top: 1px solid var(--gray-100);
+        border-bottom: 1px solid var(--gray-100);
+        margin-bottom: 8px;
+    }
+
+    .mp-stat {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .mp-stat-right {
+        align-items: flex-end;
+    }
+
+    .mp-stat-label {
+        font-size: 10px;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        font-weight: 600;
+        margin-bottom: 0;
+    }
+
+    .mp-stat-value {
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .mp-price {
+        color: var(--success);
+    }
+
+    .mp-actions {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
+    }
+
+    .mp-btn {
+        padding: 6px;
+        border-radius: 8px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 13px;
+        border: none;
+    }
+</style>
+
+{% endblock %}
