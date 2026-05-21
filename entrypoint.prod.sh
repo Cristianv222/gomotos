@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Iniciando High Voltage - MODO PRODUCCIÓN..."
+echo "🚀 Iniciando GO MOTOS - MODO PRODUCCIÓN..."
 
 # Esperar PostgreSQL
 echo "⏳ Esperando PostgreSQL..."
-while ! pg_isready -h db -p 5432 -U ${DB_USER} -d ${DB_NAME}; do
+while ! pg_isready -h ${DB_HOST:-db} -p 5432 -U ${DB_USER} -d ${DB_NAME}; do
     echo "PostgreSQL no disponible - esperando..."
     sleep 2
 done
@@ -19,47 +19,73 @@ python manage.py migrate --noinput
 echo "📁 Recopilando archivos estáticos..."
 python manage.py collectstatic --noinput --clear
 
-# Crear superusuario
-echo "👤 Configurando superusuario..."
+# Crear sucursal, dominio y superusuario
+echo "👤 Configurando datos iniciales de sistema..."
 python manage.py shell << EOF
+import os
+import datetime
 from django.contrib.auth import get_user_model
+from core.models import Sucursal, DominioSucursal
+
 User = get_user_model()
 
-# Crear superusuario si no existe
-if not User.objects.filter(usuario='hvadmin').exists():
-    User.objects.create_superuser(
-        usuario='hvadmin',
-        email='admin@fronteratech.ec',
-        password='HV@FronteraTech2025!',
-        nombre='High Voltage',
-        apellido='Administrator'
+# --- Asegurar Sucursal Matriz ---
+if not Sucursal.objects.exists():
+    print("Creando sucursal principal (Matriz)...")
+    matriz = Sucursal.objects.create(
+        codigo='MATRIZ',
+        nombre='GO MOTOS - Matriz',
+        nombre_corto='Matriz',
+        direccion='Cayambe, Ecuador',
+        ciudad='Cayambe',
+        provincia='Pichincha',
+        es_principal=True,
+        activa=True,
+        fecha_apertura=datetime.date.today()
     )
-    print('✅ Superusuario creado')
-    print('👤 Usuario: hvadmin')
-    print('🔑 Password: HV@FronteraTech2025!')
-    print('🔗 https://high-voltage.fronteratech.ec/admin/')
-    print('⚠️  CAMBIA LA CONTRASEÑA DESPUÉS DEL PRIMER LOGIN')
+    print(f"✅ Sucursal creada: {matriz.nombre}")
 else:
-    print('ℹ️  Superusuario "hvadmin" ya existe')
+    matriz = Sucursal.objects.filter(es_principal=True).first()
+    print(f"ℹ️ Sucursal Matriz ya existe: {matriz.nombre if matriz else 'No marcada como principal'}")
+
+# --- Asegurar Dominio ---
+primary_domain = os.environ.get('PRIMARY_DOMAIN', 'full-motos-nicolas.valktek.com')
+if matriz:
+    obj, created = DominioSucursal.objects.get_or_create(
+        domain=primary_domain,
+        defaults={'tenant': matriz, 'is_primary': True}
+    )
+    if created:
+        print(f"✅ Dominio principal configurado: {primary_domain}")
+
+# --- Asegurar Superusuario ---
+username = os.environ.get('DJANGO_SUPERUSER_USERNAME')
+email = os.environ.get('DJANGO_SUPERUSER_EMAIL')
+password = os.environ.get('DJANGO_SUPERUSER_PASSWORD')
+
+if not all([username, email, password]):
+    print("⚠️ ADVERTENCIA: Variables de superusuario incompletas. Saltando creación.")
+else:
+    if not User.objects.filter(usuario=username).exists():
+        print(f"Creando superusuario: {username}...")
+        User.objects.create_superuser(
+            usuario=username,
+            email=email,
+            password=password,
+            nombre='Administrador',
+            apellido='Producción',
+            sucursal=matriz
+        )
+        print("✅ Superusuario creado exitosamente.")
+    else:
+        print(f"ℹ️ El superusuario '{username}' ya existe.")
 EOF
 
 # Datos iniciales
-if [ -f "/app/ventas/fixtures/initial_data.json" ]; then
+if [ -f "/app/apps/ventas/fixtures/initial_data.json" ]; then
     echo "📥 Cargando datos iniciales..."
-    python manage.py loaddata /app/ventas/fixtures/initial_data.json || echo "⚠️  Datos ya cargados"
+    python manage.py loaddata /app/apps/ventas/fixtures/initial_data.json || echo "⚠️ Datos ya cargados"
 fi
 
-echo "🔒 Iniciando Gunicorn..."
-exec gunicorn vpmotos.wsgi:application \
-    --bind 0.0.0.0:8000 \
-    --workers 3 \
-    --threads 2 \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --timeout 120 \
-    --keep-alive 5 \
-    --log-level info \
-    --access-logfile - \
-    --error-logfile - \
-    --capture-output \
-    --enable-stdio-inheritance
+echo "🔒 Iniciando servidor Daphne (ASGI) en puerto 8000..."
+exec daphne -b 0.0.0.0 -p 8000 vpmotos.asgi:application

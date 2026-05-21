@@ -1,5 +1,5 @@
-// OPENMOTORS Service Worker v1.0
-const CACHE_NAME = 'openmotors-v1';
+// GO MOTOS Service Worker v1.0
+const CACHE_NAME = 'gomotos-v1';
 
 // Recursos estáticos a cachear para funcionamiento offline básico
 const STATIC_ASSETS = [

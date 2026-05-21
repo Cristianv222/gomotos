@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}FULL MOTOS NICOLAS{% endblock %}</title>
+    <title>{% block title %}GO MOTOS{% endblock %}</title>
 
     <!-- Favicon -->
     {% load static %}
@@ -28,11 +28,11 @@
 
     <!-- PWA / iOS Specific -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#ff4b2b">
+    <meta name="theme-color" content="#ff6f00">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Full Motos Nicolas">
+    <meta name="apple-mobile-web-app-title" content="GO MOTOS">
     <link rel="apple-touch-icon" href="{% static 'img/icon-192.png' %}">
     
     <!-- Evitar zoom táctil en iOS para sensación nativa -->
@@ -40,10 +40,10 @@
 
     <style>
         :root {
-            --primary: #ff4b2b;
-            --primary-light: #ff6b52;
+            --primary: #ff6f00;
+            --primary-light: #ff9033;
             --secondary: #1a1a1a;
-            --accent: #ffd700;
+            --accent: #0077c8;
             --success: #4cc9f0;
             --warning: #f8961e;
             --danger: #f94144;
@@ -149,7 +149,7 @@
         .navbar-link-horizontal.active {
             background: var(--primary);
             color: white;
-            box-shadow: 0 2px 8px rgba(255, 75, 43, 0.3);
+            box-shadow: 0 2px 8px rgba(255, 111, 0, 0.3);
         }
 
         .navbar-link-horizontal i {
@@ -461,7 +461,7 @@
         .mobile-sidebar-link.active {
             background: var(--primary);
             color: white;
-            box-shadow: 0 2px 8px rgba(255, 75, 43, 0.3);
+            box-shadow: 0 2px 8px rgba(255, 111, 0, 0.3);
         }
 
         .mobile-sidebar-link i {
@@ -618,7 +618,7 @@
     <nav class="navbar-horizontal">
         <!-- Brand -->
         <a href="{% url 'core:dashboard' %}" class="navbar-brand-horizontal">
-            <img src="{% static 'logo-FMN.png' %}" alt="FULL MOTOS NICOLAS">
+            <img src="{% static 'logo-gomoto.png' %}" alt="GO MOTOS" style="height: 48px; width: auto;">
         </a>
 
         <!-- Mobile Menu Toggle -->
@@ -676,21 +676,7 @@
                 </div>
             </li>
 
-            <li class="navbar-item-horizontal">
-                <a href="{% url 'taller:dashboard' %}"
-                    class="navbar-link-horizontal {% if active_page == 'taller' and active_sub != 'cotizaciones' %}active{% endif %}">
-                    <i class="fas fa-tools"></i>
-                    <span>Taller</span>
-                </a>
-            </li>
 
-            <li class="navbar-item-horizontal">
-                <a href="{% url 'taller:cotizacion_list' %}"
-                    class="navbar-link-horizontal {% if active_sub == 'cotizaciones' %}active{% endif %}">
-                    <i class="fas fa-file-invoice-dollar"></i>
-                    <span>Cotizaciones</span>
-                </a>
-            </li>
 
             <li class="navbar-item-horizontal">
                 <a href="{% url 'clientes:lista_clientes' %}"
@@ -800,7 +786,7 @@
     <aside class="mobile-sidebar" id="mobileSidebar">
         <div class="mobile-sidebar-header">
             <div class="navbar-brand-horizontal">
-                <img src="{% static 'logo-FMN.png' %}" alt="FULL MOTOS NICOLAS" style="height: 40px; width: auto;">
+                <img src="{% static 'logo-gomoto.png' %}" alt="GO MOTOS" style="height: 50px; width: auto;">
             </div>
             <button class="mobile-sidebar-close" onclick="closeMobileSidebar()">
                 <i class="fas fa-times"></i>
@@ -879,23 +865,7 @@
                 </div>
             </li>
 
-            <li class="mobile-sidebar-item">
-                <a href="{% url 'taller:dashboard' %}"
-                    class="mobile-sidebar-link {% if active_page == 'taller' and active_sub != 'cotizaciones' %}active{% endif %}"
-                    onclick="handleMobileSidebarClick(event)">
-                    <i class="fas fa-tools"></i>
-                    <span>Taller</span>
-                </a>
-            </li>
 
-            <li class="mobile-sidebar-item">
-                <a href="{% url 'taller:cotizacion_list' %}"
-                    class="mobile-sidebar-link {% if active_sub == 'cotizaciones' %}active{% endif %}"
-                    onclick="handleMobileSidebarClick(event)">
-                    <i class="fas fa-file-invoice-dollar"></i>
-                    <span>Cotizaciones</span>
-                </a>
-            </li>
 
             <li class="mobile-sidebar-item">
                 <a href="{% url 'electronic_invoicing:gestion' %}"

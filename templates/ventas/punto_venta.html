@@ -1497,10 +1497,8 @@
                     <div class="card-header bg-white py-3"><h6 class="mb-0 fw-bold">Acciones Rápidas</h6></div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-3"><a href="#" class="desktop-action-btn" onclick="showOrdersModal()"><i class="bi bi-file-text"></i>Órdenes</a></div>
-                            <div class="col-3"><a href="#" class="desktop-action-btn" onclick="showServicesModal()"><i class="bi bi-tools"></i>Servicios</a></div>
-                            <div class="col-3"><a href="#" class="desktop-action-btn" onclick="showProductsModal()"><i class="bi bi-box-seam"></i>Productos</a></div>
-                            <div class="col-3"><a href="#" class="desktop-action-btn text-primary" onclick="showAllSalesModal()"><i class="bi bi-receipt-cutoff"></i>Ventas</a></div>
+                            <div class="col-6"><a href="#" class="desktop-action-btn" onclick="showProductsModal()"><i class="bi bi-box-seam"></i>Productos</a></div>
+                            <div class="col-6"><a href="#" class="desktop-action-btn text-primary" onclick="showAllSalesModal()"><i class="bi bi-receipt-cutoff"></i>Ventas</a></div>
                         </div>
                     </div>
                 </div>
@@ -1611,9 +1609,7 @@
             <div class="fw-bold text-primary fs-5" id="mobile-total-header">S/ 0.00</div>
         </div>
 
-        <div class="mobile-actions-bar">
-            <button class="m-action-btn" onclick="showOrdersModal()"><i class="bi bi-file-earmark-text"></i><span>ÓRDENES</span></button>
-            <button class="m-action-btn" onclick="showServicesModal()"><i class="bi bi-tools"></i><span>SERVICIOS</span></button>
+        <div class="mobile-actions-bar" style="grid-template-columns: repeat(2, 1fr);">
             <button class="m-action-btn" onclick="showProductsModal()"><i class="bi bi-box-seam"></i><span>PRODUCTOS</span></button>
             <button class="m-action-btn text-primary" onclick="showAllSalesModal()"><i class="bi bi-receipt-cutoff"></i><span>VENTAS</span></button>
         </div>
@@ -2114,7 +2110,7 @@
             },
             {
                 title: "📦 1. Agrega Items",
-                text: "Usa estos botones para buscar y agregar Órdenes, Servicios o Productos al carrito.",
+                text: "Usa estos botones para buscar y agregar Productos al carrito.",
                 target: ".actions-grid",
                 tab: "catalogos"
             },

@@ -1,16 +1,16 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Dashboard - OPENMOTORS{% endblock %}
+{% block title %}Dashboard - GO MOTOS{% endblock %}
 
 {% block extra_css %}
 <style>
 body {
-    background-image: url('{% static 'img/logo-open.png' %}');
+    background-image: url('{% static 'logo-gomoto.png' %}');
     background-repeat: no-repeat;
     background-position: center center;
     background-attachment: fixed;
-    background-size: 50%;
+    background-size: 40%;
     background-color: #f0f2f5;
     position: relative;
 }
@@ -125,7 +125,7 @@ body::before {
 </div>
 {% endif %}
 
-{% if otros_cumples_usuarios or cumples_tecnicos %}
+{% if otros_cumples_usuarios %}
 <div class="row mb-4">
     <div class="col-12">
         <div class="card border-0 shadow-sm rounded-4 bg-light">
@@ -140,9 +140,6 @@ body::before {
                             {% for u in otros_cumples_usuarios %}
                                 <span class="badge bg-white text-dark border me-2"><i class="fas fa-gift text-primary me-1"></i> Hoy es el cumpleaños de <strong>{{ u.get_nombre_completo }}</strong></span>
                             {% endfor %}
-                            {% for t in cumples_tecnicos %}
-                                <span class="badge bg-white text-dark border me-2"><i class="fas fa-screwdriver-wrench text-secondary me-1"></i> Hoy es el cumpleaños del técnico <strong>{{ t.get_nombre_completo }}</strong></span>
-                            {% endfor %}
                         </p>
                     </div>
                 </div>
@@ -153,9 +150,9 @@ body::before {
 {% endif %}
 
 <!-- Quick Access Cards -->
-<div class="row g-4">
+<div class="row g-4 justify-content-center">
     {% if perms.ventas.add_venta %}
-    <div class="col-xl-3 col-lg-6 col-md-6">
+    <div class="col-xl-4 col-lg-4 col-md-6">
         <a href="{% url 'ventas:punto_venta' %}" class="text-decoration-none">
             <div class="quick-access-card border-primary-custom">
                 <i class="fas fa-cash-register text-primary"></i>
@@ -166,20 +163,10 @@ body::before {
     </div>
     {% endif %}
     
-    {% if perms.taller.add_ordentrabajo %}
-    <div class="col-xl-3 col-lg-6 col-md-6">
-        <a href="{% url 'taller:orden_create' %}" class="text-decoration-none">
-            <div class="quick-access-card border-success-custom">
-                <i class="fas fa-tools text-success"></i>
-                <h3 class="mb-2 fw-bold text-dark">Nueva Orden</h3>
-                <p class="text-muted mb-0">Crear orden de trabajo</p>
-            </div>
-        </a>
-    </div>
-    {% endif %}
+
     
     {% if perms.clientes.add_cliente %}
-    <div class="col-xl-3 col-lg-6 col-md-6">
+    <div class="col-xl-4 col-lg-4 col-md-6">
         <a href="{% url 'clientes:crear_cliente' %}" class="text-decoration-none">
             <div class="quick-access-card border-warning-custom">
                 <i class="fas fa-user-plus text-warning"></i>
@@ -191,7 +178,7 @@ body::before {
     {% endif %}
     
     {% if perms.inventario.add_producto %}
-    <div class="col-xl-3 col-lg-6 col-md-6">
+    <div class="col-xl-4 col-lg-4 col-md-6">
         <a href="{% url 'inventario:crear_producto' %}" class="text-decoration-none">
             <div class="quick-access-card border-accent-custom">
                 <i class="fas fa-box" style="color: var(--accent);"></i>
@@ -202,15 +189,7 @@ body::before {
     </div>
     {% endif %}
 
-    <div class="col-xl-3 col-lg-6 col-md-6">
-        <a href="{% url 'taller:cotizacion_create' %}" class="text-decoration-none">
-            <div class="quick-access-card border-info-custom">
-                <i class="fas fa-file-invoice-dollar text-info"></i>
-                <h3 class="mb-2 fw-bold text-dark">Nueva Cotización</h3>
-                <p class="text-muted mb-0">Crear presupuesto independiente</p>
-            </div>
-        </a>
-    </div>
+
 </div>
 
 <script>

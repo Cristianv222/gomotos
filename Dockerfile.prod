@@ -102,20 +102,4 @@ EXPOSE 8000
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Comando por defecto para producción
-CMD ["gunicorn", \
-     "core.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "5", \
-     "--threads", "2", \
-     "--worker-class", "gthread", \
-     "--worker-tmp-dir", "/dev/shm", \
-     "--timeout", "120", \
-     "--graceful-timeout", "30", \
-     "--keep-alive", "5", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "50", \
-     "--preload", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--log-level", "info", \
-     "--capture-output"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "vpmotos.asgi:application"]

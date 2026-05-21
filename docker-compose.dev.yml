@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:15
-    container_name: inventario-db
+    container_name: gomotos-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
@@ -17,11 +17,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - inventario_network
+      - gomotos_network
 
   redis:
     image: redis:7-alpine
-    container_name: inventario-redis
+    container_name: gomotos-redis
     restart: unless-stopped
     ports:
       - "6380:6379"
@@ -33,11 +33,11 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - inventario_network
+      - gomotos_network
 
   web:
     build: .
-    container_name: inventario-web
+    container_name: gomotos-web
     restart: unless-stopped
     ports:
       - "8001:8000"
@@ -46,7 +46,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       - REDIS_URL=redis://redis:6379/0
-      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web,.ngrok-free.app,.ngrok.io,inventario-web
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web,.ngrok-free.app,.ngrok.io,gomotos-web
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
@@ -65,11 +65,11 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - inventario_network
+      - gomotos_network
 
   ngrok:
     image: ngrok/ngrok:latest
-    container_name: inventario-ngrok
+    container_name: gomotos-ngrok
     restart: unless-stopped
     command:
       - "http"
@@ -83,7 +83,7 @@ services:
     depends_on:
       - web
     networks:
-      - inventario_network
+      - gomotos_network
 
 volumes:
   postgres_data:
@@ -92,6 +92,6 @@ volumes:
   media_volume:
 
 networks:
-  inventario_network:
+  gomotos_network:
     driver: bridge
-    name: inventario_inventario_network
+    name: gomotos_network

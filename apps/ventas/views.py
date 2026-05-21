@@ -1,0 +1,2371 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponse, JsonResponse
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib import messages
+from django.db import transaction, models
+from django.db.models import Q, Sum, Count, Avg
+from django.utils import timezone
+from django.core.serializers.json import DjangoJSONEncoder
+from django.core.paginator import Paginator
+from django.conf import settings
+from django.db.models.functions import TruncDate
+import json
+import os
+import base64
+import logging
+import logging
+import datetime as dt_module
+from datetime import datetime, timedelta, time
+from decimal import Decimal
+from .services.ticket_service import TicketThermalService
+from .models import Venta, DetalleVenta, CierreCaja
+from .forms import VentaForm, DetalleVentaFormSet, CierreCajaForm, AgregarProductoForm
+# from .services.factura_service import FacturaService  # ← COMENTADO PARA EVITAR ERROR AL INICIAR
+from clientes.models import Cliente, PedidoOnline, DetallePedidoOnline
+from inventario.models import Producto
+from inventario.views import requiere_token_api
+from .models import Devolucion, DetalleDevolucion
+
+# Electronic Invoicing
+from electronic_invoicing.models import ComprobanteElectronico, PuntoEmision
+from electronic_invoicing.tasks import procesar_factura_electronica
+
+logger = logging.getLogger(__name__)
+
+# ========== PIN SERVICIO MANUAL ==========
+
+@login_required
+@require_POST
+def verificar_pin_servicio_manual(request):
+    """
+    Verifica el PIN requerido para usar el Servicio Manual o servicios editables.
+    Implementa rate-limiting por sesión: máx 5 intentos.
+    """
+    MAX_INTENTOS = 5
+    SESSION_KEY_INTENTOS = '_pin_sm_intentos'
+    SESSION_KEY_BLOQUEADO = '_pin_sm_bloqueado'
+
+    # ¿Está bloqueado?
+    if request.session.get(SESSION_KEY_BLOQUEADO, False):
+        return JsonResponse({'ok': False, 'bloqueado': True,
+                             'mensaje': 'Demasiados intentos incorrectos. Recarga la página.'})
+
+    try:
+        data = json.loads(request.body)
+        pin_ingresado = str(data.get('pin', '')).strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'ok': False, 'mensaje': 'Solicitud inválida'}, status=400)
+
+    pin_correcto = str(settings.VPMOTOS_SETTINGS.get('MANUAL_SERVICE_PIN', '1234')).strip()
+
+    if pin_ingresado == pin_correcto:
+        # Reiniciar conteo al acertar
+        request.session[SESSION_KEY_INTENTOS] = 0
+        return JsonResponse({'ok': True})
+    else:
+        intentos = request.session.get(SESSION_KEY_INTENTOS, 0) + 1
+        request.session[SESSION_KEY_INTENTOS] = intentos
+        if intentos >= MAX_INTENTOS:
+            request.session[SESSION_KEY_BLOQUEADO] = True
+            return JsonResponse({'ok': False, 'bloqueado': True,
+                                 'mensaje': 'Demasiados intentos. Recarga la página.'})
+        restantes = MAX_INTENTOS - intentos
+        return JsonResponse({'ok': False, 'bloqueado': False,
+                             'intentos_restantes': restantes,
+                             'mensaje': f'PIN incorrecto. Intentos restantes: {restantes}'})
+
+# ========== FUNCIONES AUXILIARES ==========
+
+def obtener_venta_por_id_o_numero(identificador):
+    """
+    Obtiene una venta por ID numérico o por número de factura
+    """
+    try:
+        # Si ya es un número (int o float)
+        if isinstance(identificador, (int, float)):
+            return get_object_or_404(Venta, pk=int(identificador))
+            
+        # Si es string, ver si es numérico
+        if isinstance(identificador, str) and identificador.isdigit():
+            return get_object_or_404(Venta, pk=int(identificador))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    
+    # Buscar por número de factura (FAC-XXXXXX)
+    return get_object_or_404(Venta, numero_factura=str(identificador))
+
+# ========== VISTAS PRINCIPALES DE VENTAS ==========
+
+@login_required
+def lista_ventas(request):
+    """Dashboard principal de ventas con métricas en tiempo real"""
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    week_ago = today - timedelta(days=7)
+    
+    # ========== ESTADÍSTICAS PRINCIPALES ==========
+    
+    hoy_start = timezone.make_aware(datetime.combine(today, time.min))
+    hoy_end = timezone.make_aware(datetime.combine(today, time.max))
+    ayer_start = timezone.make_aware(datetime.combine(yesterday, time.min))
+    ayer_end = timezone.make_aware(datetime.combine(yesterday, time.max))
+    
+    # Ventas de hoy
+    ventas_hoy = Venta.objects.filter(
+        fecha_hora__range=(hoy_start, hoy_end),
+        estado='COMPLETADA'
+    )
+    
+    # Ventas de ayer para comparación
+    ventas_ayer = Venta.objects.filter(
+        fecha_hora__range=(ayer_start, ayer_end),
+        estado='COMPLETADA'
+    )
+    
+    # Estadísticas básicas
+    total_ventas_hoy = ventas_hoy.count()
+    total_ventas_ayer = ventas_ayer.count()
+    
+    ingresos_hoy = ventas_hoy.aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+    ingresos_ayer = ventas_ayer.aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+    
+    # Cálculo de crecimiento
+    crecimiento_ventas = 0
+    if total_ventas_ayer > 0:
+        crecimiento_ventas = ((total_ventas_hoy - total_ventas_ayer) / total_ventas_ayer) * 100
+    
+    crecimiento_ingresos = 0
+    if ingresos_ayer > 0:
+        crecimiento_ingresos = ((ingresos_hoy - ingresos_ayer) / ingresos_ayer) * 100
+    
+    # Taller removido: variables mockeadas
+    ordenes_pendientes = []
+    ordenes_pendientes_count = 0
+    ordenes_ayer = 0
+    variacion_ordenes = 0
+    
+    # Productos bajo stock
+    productos_bajo_stock = Producto.objects.filter(
+        stock_actual__lte=5,
+        activo=True
+    ).count()
+    
+    # Progreso de metas (puedes ajustar estos valores)
+    meta_ventas_diaria = 50  # Meta de ventas por día
+    meta_ingresos_diaria = Decimal('10000.00')  # Meta de ingresos por día
+    
+    progreso_ventas = min((total_ventas_hoy / meta_ventas_diaria) * 100, 100) if meta_ventas_diaria > 0 else 0
+    progreso_ingresos = min((float(ingresos_hoy) / float(meta_ingresos_diaria)) * 100, 100) if meta_ingresos_diaria > 0 else 0
+    
+    # Urgencia de órdenes (porcentaje basado en antigüedad)
+    urgencia_ordenes = 0
+    
+    # Nivel de stock (inverso - menos productos bajo stock = mejor nivel)
+    total_productos = Producto.objects.filter(activo=True).count()
+    nivel_stock = 100 - ((productos_bajo_stock / total_productos) * 100) if total_productos > 0 else 100
+    
+    # ========== GRÁFICO DE VENTAS DE LOS ÚLTIMOS 7 DÍAS ==========
+    
+    grafico_ventas = []
+    dias_semana = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+    
+    for i in range(7):
+        fecha = today - timedelta(days=6-i)
+        
+        ventas_dia = Venta.objects.filter(
+            fecha_hora__date=fecha,
+            estado='COMPLETADA'
+        ).aggregate(
+            total=Sum('total'),
+            cantidad=Count('id')
+        )
+        
+        total_dia = float(ventas_dia['total'] or 0)
+        cantidad_dia = ventas_dia['cantidad'] or 0
+        
+        # Calcular altura para el gráfico (máximo 180px)
+        max_ingresos = float(ingresos_hoy) if ingresos_hoy > 0 else 1000
+        altura = min((total_dia / max_ingresos) * 180, 180) if total_dia > 0 else 5
+        
+        grafico_ventas.append({
+            'fecha': fecha.strftime('%Y-%m-%d'),
+            'dia': dias_semana[fecha.weekday()],
+            'total': total_dia,
+            'cantidad': cantidad_dia,
+            'altura': altura
+        })
+    
+    # ========== VENTAS RECIENTES ==========
+    
+    ventas_recientes = Venta.objects.filter(
+        fecha_hora__date=today,
+        estado='COMPLETADA'
+    ).select_related('cliente', 'comprobante_electronico').order_by('-fecha_hora')[:5]
+    
+    # ========== PRODUCTOS MÁS VENDIDOS ==========
+    
+    try:
+        productos_top = DetalleVenta.objects.filter(
+            venta__fecha_hora__date__gte=week_ago,
+            venta__estado='COMPLETADA',
+            producto__isnull=False
+        ).values(
+            'producto__nombre'
+        ).annotate(
+            total_vendido=Sum('cantidad'),
+            ingresos=Sum('total')
+        ).order_by('-total_vendido')[:5]
+        
+        # Renombrar para el template
+        for producto in productos_top:
+            producto['nombre'] = producto['producto__nombre']
+    except:
+        productos_top = []
+    
+    # ========== VENTAS PARA EL MODAL ==========
+    
+    ventas_modal = Venta.objects.filter(
+        fecha_hora__date__gte=week_ago
+    ).select_related('cliente', 'comprobante_electronico').order_by('-fecha_hora')[:20]
+    
+    # ========== COMPILAR ESTADÍSTICAS ==========
+    
+    estadisticas = {
+        'ventas_hoy': total_ventas_hoy,
+        'ingresos_hoy': float(ingresos_hoy),
+        'ordenes_pendientes': ordenes_pendientes_count,
+        'productos_bajo_stock': productos_bajo_stock,
+        'crecimiento_ventas': crecimiento_ventas,
+        'crecimiento_ingresos': crecimiento_ingresos,
+        'variacion_ordenes': variacion_ordenes,
+        'progreso_ventas': progreso_ventas,
+        'progreso_ingresos': progreso_ingresos,
+        'urgencia_ordenes': urgencia_ordenes,
+        'nivel_stock': nivel_stock,
+    }
+    
+    context = {
+        'active_page': 'ventas',
+        'estadisticas': estadisticas,
+        'grafico_ventas': grafico_ventas,
+        'ventas_recientes': ventas_recientes,
+        'productos_top': productos_top,
+        'ordenes_pendientes': ordenes_pendientes,
+        'ventas_modal': ventas_modal,
+    }
+    
+    return render(request, 'ventas/lista_ventas.html', context)
+
+@login_required
+@transaction.atomic
+def crear_venta(request):
+    """Crea una nueva venta"""
+    if request.method == 'POST':
+        form = VentaForm(request.POST)
+        
+        if form.is_valid():
+            venta = form.save(commit=False)
+            venta.usuario = request.user
+            
+            if form.cleaned_data['consumidor_final']:
+                venta.cliente = Cliente.get_consumidor_final()
+            else:
+                identificacion = form.cleaned_data['cliente_identificacion']
+                try:
+                    venta.cliente = Cliente.objects.get(identificacion=identificacion)
+                except Cliente.DoesNotExist:
+                    messages.error(request, "Cliente no encontrado")
+                    return render(request, 'ventas/venta_form.html', {
+                        'active_page': 'ventas',
+                        'form': form,
+                        'modo_venta': True
+                    })
+            
+            venta.subtotal = Decimal('0.00')
+            venta.iva = Decimal('0.00')
+            venta.total = Decimal('0.00')
+            venta.save()
+            
+            messages.success(request, "Venta creada correctamente. Agregue productos o servicios.")
+            return redirect('ventas:editar_venta', venta_id=venta.id)
+    else:
+        form = VentaForm(initial={'consumidor_final': True})
+    
+    return render(request, 'ventas/venta_form.html', {
+        'active_page': 'ventas',
+        'form': form,
+        'modo_venta': True
+    })
+
+@login_required
+@transaction.atomic
+def editar_venta(request, venta_id):
+    """Edita una venta existente"""
+    venta = get_object_or_404(Venta, pk=venta_id)
+    
+    if venta.estado == 'ANULADA':
+        messages.error(request, "No se puede editar una venta anulada")
+        return redirect('ventas:lista_ventas')
+    
+    if request.method == 'POST':
+        form = VentaForm(request.POST, instance=venta)
+        formset = DetalleVentaFormSet(request.POST, instance=venta)
+        
+        if form.is_valid() and formset.is_valid():
+            venta = form.save(commit=False)
+            detalles = formset.save(commit=False)
+            subtotal = sum(detalle.subtotal for detalle in detalles)
+            iva = sum(detalle.iva for detalle in detalles)
+            descuento = venta.descuento or Decimal('0.00')
+            total = subtotal + iva - descuento
+            
+            venta.subtotal = subtotal
+            venta.iva = iva
+            venta.total = total
+            venta.save()
+            
+            for obj in formset.deleted_objects:
+                obj.delete()
+            
+            for detalle in detalles:
+                detalle.save()
+            
+            messages.success(request, "Venta actualizada correctamente.")
+            return redirect('ventas:detalle_venta', venta_id=venta.id)
+    else:
+        form = VentaForm(instance=venta)
+        formset = DetalleVentaFormSet(instance=venta)
+    
+    productos = Producto.objects.filter(activo=True)
+    
+    return render(request, 'ventas/venta_form.html', {
+        'active_page': 'ventas',
+        'form': form,
+        'formset': formset,
+        'venta': venta,
+        'productos': productos,
+        'modo_venta': True,
+        'es_edicion': True
+    })
+
+@login_required
+@require_POST
+@transaction.atomic
+def anular_venta(request, venta_id):
+    """Anula una venta"""
+    venta = get_object_or_404(Venta, pk=venta_id)
+    
+    if venta.estado == 'ANULADA':
+        messages.error(request, "Esta venta ya está anulada")
+        return redirect('ventas:detalle_venta', venta_id=venta.id)
+    
+    if venta.anular():
+        messages.success(request, "Venta anulada correctamente")
+    else:
+        messages.error(request, "No se pudo anular la venta")
+    
+    return redirect('ventas:detalle_venta', venta_id=venta.id)
+
+@login_required
+@require_POST
+@transaction.atomic
+def agregar_producto(request, venta_id):
+    """Agrega un producto a una venta"""
+    venta = get_object_or_404(Venta, pk=venta_id)
+    
+    if venta.estado == 'ANULADA':
+        messages.error(request, "No se pueden agregar productos a una venta anulada")
+        return redirect('ventas:editar_venta', venta_id=venta.id)
+    
+    form = AgregarProductoForm(request.POST)
+    
+    if form.is_valid():
+        codigo = form.cleaned_data['codigo']
+        cantidad = form.cleaned_data['cantidad']
+        
+        try:
+            producto = Producto.objects.get(codigo_unico=codigo)
+            
+            if producto.stock_actual < cantidad:
+                messages.error(request, f"Stock insuficiente. Disponible: {producto.stock_actual}")
+                return redirect('ventas:editar_venta', venta_id=venta.id)
+            
+            try:
+                detalle = DetalleVenta.objects.get(venta=venta, producto=producto)
+                detalle.cantidad += cantidad
+                detalle.subtotal = detalle.cantidad * detalle.precio_unitario
+                detalle.iva = detalle.subtotal * (detalle.iva_porcentaje / 100)
+                detalle.total = detalle.subtotal + detalle.iva - detalle.descuento
+                detalle.save()
+                
+                messages.success(request, f"Se actualizó la cantidad del producto {producto.nombre}")
+            except DetalleVenta.DoesNotExist:
+                detalle = DetalleVenta(
+                    venta=venta,
+                    producto=producto,
+                    cantidad=cantidad,
+                    precio_unitario=producto.precio_venta,
+                    subtotal=producto.precio_venta * cantidad,
+                    iva_porcentaje=Decimal('15.00'),
+                    iva=(producto.precio_venta * cantidad) * Decimal('0.15'),
+                    descuento=Decimal('0.00'),
+                    total=(producto.precio_venta * cantidad) * Decimal('1.15')
+                )
+                detalle.save()
+                
+                messages.success(request, f"Producto {producto.nombre} agregado correctamente")
+            
+            producto.stock_actual -= cantidad
+            producto.save()
+            
+            detalles_subtotal = venta.detalleventa_set.aggregate(total=models.Sum('subtotal'))
+            detalles_iva = venta.detalleventa_set.aggregate(total=models.Sum('iva'))
+            
+            venta.subtotal = detalles_subtotal['total'] or Decimal('0.00')
+            venta.iva = detalles_iva['total'] or Decimal('0.00')
+            venta.total = venta.subtotal + venta.iva - venta.descuento
+            venta.save()
+            
+        except Producto.DoesNotExist:
+            messages.error(request, "Producto no encontrado")
+    else:
+        for field, errors in form.errors.items():
+            for error in errors:
+                messages.error(request, error)
+    
+    return redirect('ventas:editar_venta', venta_id=venta.id)
+
+# ========== PUNTO DE VENTA (POS) ==========
+
+@login_required
+@transaction.atomic
+def punto_venta(request):
+    """Vista para el punto de venta (POS)"""
+    productos = Producto.objects.filter(activo=True, stock_actual__gt=0)[:30]
+    
+    if request.method == 'POST':
+        try:
+            # Logging para debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            data = json.loads(request.body)
+            logger.info(f"Datos recibidos en POS: {data}")
+            
+            # Obtener el ID de la orden (puede venir como 'order_id' o 'orden_trabajo_id')
+            order_id = data.get('order_id') or data.get('orden_trabajo_id')
+            
+            if not data.get('items') and not order_id:
+                return JsonResponse({'success': False, 'mensaje': 'No hay productos en la venta ni orden de trabajo'})
+            
+            # ========== OBTENER O CREAR CLIENTE ==========
+            cliente = None
+            if data.get('cliente_id'):
+                try:
+                    cliente = Cliente.objects.get(id=data['cliente_id'])
+                    logger.info(f"Cliente encontrado: {cliente.nombres} {cliente.apellidos}")
+                except Cliente.DoesNotExist:
+                    logger.error(f"Cliente con ID {data['cliente_id']} no encontrado")
+                    return JsonResponse({'success': False, 'mensaje': 'Cliente no encontrado'})
+            else:
+                cliente = Cliente.get_consumidor_final()
+                logger.info("Usando consumidor final")
+            
+            # ========== CREAR VENTA ==========
+            venta = Venta.objects.create(
+                cliente=cliente,
+                usuario=request.user,
+                subtotal=Decimal(str(data.get('subtotal', '0.00'))),
+                iva=Decimal(str(data.get('iva', '0.00'))),
+                descuento=Decimal(str(data.get('descuento', '0.00'))),
+                total=Decimal(str(data.get('total', '0.00'))),
+                tipo_pago=data.get('tipo_pago', 'EFECTIVO'),
+                observaciones=data.get('observaciones', ''),
+                orden_trabajo_id=order_id
+            )
+            logger.info(f"Venta creada con ID: {venta.id}, Número: {venta.numero_factura}")
+            
+            # ========== PROCESAR ITEMS (si existen) ==========
+            detalles_creados = 0
+            
+            for item_index, item in enumerate(data.get('items', [])):
+                logger.info(f"Procesando item {item_index + 1}: {item}")
+                
+                if item['tipo'] == 'producto':
+                    try:
+                        producto = Producto.objects.get(id=item['id'])
+                        logger.info(f"Producto encontrado: {producto.nombre}, Stock actual: {producto.stock_actual}")
+                        
+                        cantidad = Decimal(str(item['cantidad']))
+                        if producto.stock_actual < cantidad:
+                            venta.delete()
+                            logger.error(f'Stock insuficiente para {producto.nombre}. Disponible: {producto.stock_actual}')
+                            return JsonResponse({
+                                'success': False, 
+                                'mensaje': f'Stock insuficiente para {producto.nombre}. Disponible: {producto.stock_actual}'
+                            })
+                        
+                        # Crear detalle de venta para PRODUCTO (con IVA 15%)
+                        detalle = DetalleVenta.objects.create(
+                            venta=venta,
+                            producto=producto,
+                            nombre_personalizado=item.get('name') if producto.es_editable else None,
+                            cantidad=cantidad,
+                            precio_unitario=Decimal(str(item['precio_unitario'])),
+                            subtotal=Decimal(str(item['subtotal'])),
+                            iva_porcentaje=Decimal('15.00'),
+                            iva=Decimal(str(item['iva'])),
+                            descuento_porcentaje=Decimal(str(item.get('descuento_porcentaje', '0.00'))),
+                            descuento=Decimal(str(item.get('descuento', '0.00'))),
+                            total=Decimal(str(item['total']))
+                        )
+                        
+                        # ✅ ACTUALIZAR STOCK - CRÍTICO
+                        stock_anterior = producto.stock_actual
+                        producto.stock_actual -= cantidad
+                        producto.save()
+                        
+                        detalles_creados += 1
+                        logger.info(f"Detalle creado para producto {producto.nombre}. Stock: {stock_anterior} -> {producto.stock_actual}")
+                        
+                    except Producto.DoesNotExist:
+                        venta.delete()
+                        logger.error(f'Producto ID {item["id"]} no encontrado')
+                        return JsonResponse({'success': False, 'mensaje': f'Producto ID {item["id"]} no encontrado'})
+                
+                elif item['tipo'] == 'servicio':
+                    try:
+                        tipo_servicio = TipoServicio.objects.get(id=item['id'])
+                        tecnico = None
+                        
+                        if item.get('tecnico_id'):
+                            tecnico = Tecnico.objects.get(id=item['tecnico_id'])
+                            logger.info(f"Técnico asignado: {tecnico.get_nombre_completo()}")
+                        
+                        # ✅ Crear detalle de servicio SIN IVA
+                        cantidad = Decimal(str(item['cantidad']))
+                        precio_unitario = Decimal(str(item['precio_unitario']))
+                        subtotal = cantidad * precio_unitario
+                        descuento_porcentaje = Decimal(str(item.get('descuento_porcentaje', '0.00')))
+                        descuento = Decimal(str(item.get('descuento', '0.00')))
+                        
+                        detalle = DetalleVenta.objects.create(
+                            venta=venta,
+                            tipo_servicio=tipo_servicio,
+                            nombre_personalizado=item.get('name', ''),
+                            tecnico=tecnico,
+                            cantidad=cantidad,
+                            precio_unitario=precio_unitario,
+                            subtotal=subtotal,
+                            iva_porcentaje=Decimal('0.00'),  # ✅ Servicios SIN IVA
+                            iva=Decimal('0.00'),              # ✅ Servicios SIN IVA
+                            descuento_porcentaje=descuento_porcentaje,
+                            descuento=descuento,
+                            total=subtotal - descuento,       # ✅ Total = Subtotal - Descuento
+                            es_servicio=True
+                        )
+                        
+                        detalles_creados += 1
+                        logger.info(f"Detalle creado para servicio: {tipo_servicio.nombre} SIN IVA - Custom Name: {item.get('name')}")
+                        
+                    except (TipoServicio.DoesNotExist, Tecnico.DoesNotExist) as e:
+                        venta.delete()
+                        logger.error(f'Servicio o técnico no encontrado: {str(e)}')
+                        return JsonResponse({'success': False, 'mensaje': f'Servicio o técnico no encontrado: {str(e)}'})
+                
+                else:
+                    # Item manual o genérico
+                    logger.info(f"Procesando item manual: {item.get('name')}")
+                    cantidad = Decimal(str(item.get('cantidad', '1.00')))
+                    precio_unitario = Decimal(str(item.get('precio_unitario', '0.00')))
+                    subtotal = cantidad * precio_unitario
+                    
+                    detalle = DetalleVenta.objects.create(
+                        venta=venta,
+                        nombre_personalizado=item.get('name', 'Servicio Manual'),
+                        cantidad=cantidad,
+                        precio_unitario=precio_unitario,
+                        subtotal=subtotal,
+                        iva_porcentaje=Decimal('0.00'),
+                        iva=Decimal('0.00'),
+                        total=subtotal,
+                        es_servicio=True
+                    )
+                    detalles_creados += 1
+            
+            logger.info(f"Detalles creados: {detalles_creados} de {len(data.get('items', []))} items")
+            
+            # ========== MANEJAR ORDEN DE TRABAJO REMOVIDO ==========
+            pass
+            
+            # ========== VERIFICAR DETALLES CREADOS (solo si hay items) ==========
+            if data.get('items'):
+                detalles_en_bd = DetalleVenta.objects.filter(venta=venta).count()
+                logger.info(f"Detalles en BD después de crear venta: {detalles_en_bd}")
+                
+                # Solo fallar si NO hay detalles Y TAMPOCO hay una orden de trabajo
+                if detalles_en_bd == 0 and not order_id:
+                    logger.error("No se crearon detalles de venta y no hay orden de trabajo")
+                    return JsonResponse({'success': False, 'mensaje': 'Error: No se pudieron crear los detalles de la venta'})
+            elif not order_id:
+                # Si no hay items y tampoco hay orden, entonces sí es un error
+                return JsonResponse({'success': False, 'mensaje': 'Error: La venta no tiene productos ni orden de trabajo'})
+            
+            # ========== MANEJO DE IMPRESIÓN ==========
+            if data.get('imprimir'):
+                try:
+                    # IMPORT LOCAL AQUÍ:
+                    from .services.factura_service import FacturaService
+                    
+                    if data.get('tipo_impresion') == 'ticket':
+                        FacturaService.imprimir_ticket(venta)
+                        logger.info("Ticket enviado a impresión")
+                    else:
+                        FacturaService.imprimir_factura(venta)
+                        logger.info("Factura enviada a impresión")
+                except Exception as e:
+                    logger.error(f"Error en impresión: {str(e)}")
+                    # No fallar la venta por error de impresión
+            
+            # ========== RESPUESTA EXITOSA ==========
+            response_data = {
+                'success': True,
+                'venta_id': venta.id,
+                'numero_factura': venta.numero_factura,
+                'mensaje': 'Venta registrada correctamente',
+                'detalles_creados': DetalleVenta.objects.filter(venta=venta).count(),
+                'total': float(venta.total)
+            }
+            
+            logger.info(f"Venta procesada exitosamente: {response_data}")
+            return JsonResponse(response_data)
+            
+        except Exception as e:
+            logger.error(f"Error procesando venta: {str(e)}", exc_info=True)
+            return JsonResponse({'success': False, 'mensaje': f'Error interno: {str(e)}'})
+    
+    # GET request - mostrar la página del POS
+    return render(request, 'ventas/punto_venta.html', {
+        'active_page': 'ventas',
+        'productos': productos,
+        'fecha_actual': timezone.localdate().strftime('%d/%m/%Y')
+    })
+
+# pos_con_orden removido
+
+# ========== DEVOLUCIONES Y CAMBIOS ==========
+
+@login_required
+def devolucion_create(request, venta_id):
+    """Muestra el formulario asistido para realizar una devolución/cambio"""
+    venta = get_object_or_404(Venta, pk=venta_id)
+    
+    if venta.estado != 'COMPLETADA':
+        messages.error(request, "Solo se pueden hacer devoluciones de ventas completadas.")
+        return redirect('ventas:detalle_venta', venta_id=venta_id)
+        
+    # Obtener devoluciones anteriores para esta venta (si existen) y las cantidades ya devueltas
+    detalles_venta = venta.detalleventa_set.select_related('producto', 'tipo_servicio').all()
+    
+    # Pre-cargar datos
+    items_disponibles = []
+    for d in detalles_venta:
+        if d.producto:
+            # Calcular cuánto se ha devuelto ya de este producto
+            cant_devuelta = DetalleDevolucion.objects.filter(
+                devolucion__venta=venta,
+                devolucion__estado='COMPLETADA',
+                tipo='DEVUELTO',
+                producto=d.producto
+            ).aggregate(total=Sum('cantidad'))['total'] or Decimal('0.00')
+            
+            disponible = d.cantidad - cant_devuelta
+            
+            if disponible > 0:
+                items_disponibles.append({
+                    'id': d.id,
+                    'producto_id': d.producto.id,
+                    'codigo': d.producto.codigo_unico,
+                    'nombre': d.producto.nombre,
+                    'precio_unitario': float(d.precio_unitario),
+                    'cantidad_comprada': float(d.cantidad),
+                    'cantidad_disponible': float(disponible)
+                })
+                
+    context = {
+        'active_page': 'ventas',
+        'venta': venta,
+        'items_disponibles_json': json.dumps(items_disponibles)
+    }
+    return render(request, 'ventas/devolucion_form.html', context)
+
+@login_required
+@require_POST
+@transaction.atomic
+def api_procesar_devolucion(request):
+    """Procesa una transacción de devolución o cambio por API"""
+    try:
+        data = json.loads(request.body)
+        venta_id = data.get('venta_id')
+        venta = get_object_or_404(Venta, pk=venta_id)
+        
+        items_devueltos = data.get('items_devueltos', [])
+        items_nuevos = data.get('items_nuevos', [])
+        
+        if not items_devueltos and not items_nuevos:
+             return JsonResponse({'success': False, 'mensaje': 'Debe ingresar ítems devueltos o nuevos'})
+             
+        # Validar cantidades devueltas vs compradas
+        for item in items_devueltos:
+            producto = Producto.objects.get(id=item['producto_id'])
+            cantidad = Decimal(str(item['cantidad']))
+            # Comprobar límite
+            detalle = DetalleVenta.objects.filter(venta=venta, producto=producto).first()
+            if not detalle:
+                return JsonResponse({'success': False, 'mensaje': f'El producto {producto.nombre} no pertenece a la venta original.'})
+                
+            cant_ya_devuelta = DetalleDevolucion.objects.filter(
+                devolucion__venta=venta,
+                devolucion__estado='COMPLETADA',
+                tipo='DEVUELTO',
+                producto=producto
+            ).aggregate(total=Sum('cantidad'))['total'] or Decimal('0.00')
+            
+            disponible = detalle.cantidad - cant_ya_devuelta
+            if cantidad > disponible:
+                return JsonResponse({
+                    'success': False, 
+                    'mensaje': f'No puede devolver más cantidad de {producto.nombre} que la disponible ({disponible}).'
+                })
+                
+        # Crear Devolución
+        total_devuelto = sum(Decimal(str(i['precio_unitario'])) * Decimal(str(i['cantidad'])) for i in items_devueltos)
+        total_nuevo = sum(Decimal(str(i['precio_unitario'])) * Decimal(str(i['cantidad'])) for i in items_nuevos)
+        observaciones = data.get('observaciones', '')
+        
+        devolucion = Devolucion.objects.create(
+            venta=venta,
+            usuario=request.user,
+            total_devuelto=total_devuelto,
+            total_nuevo=total_nuevo,
+            observaciones=observaciones
+        )
+        
+        # Registrar y actualizar stock items devueltos
+        for item in items_devueltos:
+            producto = Producto.objects.get(id=item['producto_id'])
+            cantidad = Decimal(str(item['cantidad']))
+            precio = Decimal(str(item['precio_unitario']))
+            
+            DetalleDevolucion.objects.create(
+                devolucion=devolucion,
+                tipo='DEVUELTO',
+                producto=producto,
+                cantidad=cantidad,
+                precio_unitario=precio
+            )
+            
+        # Registrar y actualizar stock items nuevos
+        for item in items_nuevos:
+            producto = Producto.objects.get(id=item['producto_id'])
+            cantidad = Decimal(str(item['cantidad']))
+            precio = Decimal(str(item['precio_unitario']))
+            
+            if producto.stock_actual < cantidad:
+                raise Exception(f"Stock insuficiente para {producto.nombre}. Disponible: {producto.stock_actual}")
+                
+            DetalleDevolucion.objects.create(
+                devolucion=devolucion,
+                tipo='NUEVO',
+                producto=producto,
+                cantidad=cantidad,
+                precio_unitario=precio
+            )
+            
+        # Aplicar los cambios de inventario
+        devolucion.aplicar_inventario()
+        
+        return JsonResponse({
+            'success': True,
+            'mensaje': 'Devolución/Cambio procesado exitosamente',
+            'devolucion_id': devolucion.id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error procesando devolución: {str(e)}", exc_info=True)
+        return JsonResponse({'success': False, 'mensaje': f'Error interno: {str(e)}'})
+
+@login_required
+def devolucion_detail(request, devolucion_id):
+    """Vista de recibo resumen de la devolución"""
+    devolucion = get_object_or_404(Devolucion, pk=devolucion_id)
+    return render(request, 'ventas/devolucion_detail.html', {
+        'active_page': 'ventas',
+        'devolucion': devolucion
+    })
+
+# ========== APIs PARA EL POS ==========
+
+@login_required
+def api_buscar_producto(request):
+    """API para buscar producto por código en el POS"""
+    codigo = request.GET.get('codigo', '').strip().upper()
+    
+    if not codigo:
+        return JsonResponse({'success': False, 'message': 'Código requerido'})
+    
+    try:
+        producto = Producto.objects.filter(
+            Q(codigo_unico=codigo) | Q(codigo_barras=codigo),
+            activo=True
+        ).first()
+        
+        if producto:
+            return JsonResponse({
+                'success': True,
+                'producto': {
+                    'id': producto.id,
+                    'codigo': producto.codigo_unico or producto.codigo_barras,
+                    'nombre': producto.nombre,
+                    'precio': float(producto.precio_venta),
+                    'stock': float(producto.stock_actual),
+                    'categoria': producto.categoria.nombre if producto.categoria else None,
+                    'activo': producto.activo,
+                    'incluye_iva': producto.incluye_iva,
+                    'es_editable': producto.es_editable
+                }
+            })
+        else:
+            return JsonResponse({'success': False, 'message': 'Producto no encontrado'})
+            
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': f'Error: {str(e)}'})
+
+@login_required
+def api_productos(request):
+    """API para obtener lista de productos"""
+    search = request.GET.get('q', '').strip()
+    limit = int(request.GET.get('limit', 50))
+    
+    productos = Producto.objects.filter(activo=True)
+    
+    if search:
+        productos = productos.filter(
+            Q(nombre__icontains=search) |
+            Q(codigo_unico__icontains=search) |
+            Q(codigo_barras__icontains=search)
+        )
+    
+    productos = productos.select_related('categoria')[:limit]
+    
+    productos_data = []
+    for producto in productos:
+        productos_data.append({
+            'id': producto.id,
+            'codigo': producto.codigo_unico or producto.codigo_barras,
+            'nombre': producto.nombre,
+            'precio': float(producto.precio_venta),
+            'stock': float(producto.stock_actual),
+            'categoria': producto.categoria.nombre if producto.categoria else None,
+            'activo': producto.activo,
+            'descripcion': producto.descripcion or '',
+            'incluye_iva': producto.incluye_iva,
+            'es_editable': producto.es_editable
+        })
+    
+    return JsonResponse({
+        'success': True,
+        'productos': productos_data
+    })
+
+@login_required
+def api_tecnicos(request):
+    """API para obtener lista de técnicos (Removido)"""
+    return JsonResponse({
+        'success': True,
+        'tecnicos': []
+    })
+
+@login_required
+def api_servicios(request):
+    """API para obtener lista de servicios (Removido)"""
+    return JsonResponse({
+        'success': True,
+        'servicios': []
+    })
+
+@login_required
+def api_ordenes_completadas(request):
+    """API para obtener órdenes listas para facturar (Removido)"""
+    return JsonResponse({
+        'success': True,
+        'ordenes': []
+    })
+
+@login_required  
+def api_orden_datos_pos(request, orden_id):
+    """API para obtener datos de una orden para el POS (Removido)"""
+    return JsonResponse({
+        'success': False,
+        'message': 'Módulo de taller no disponible'
+    }, status=400)
+        
+@login_required
+def api_buscar_clientes(request):
+    """API para buscar clientes"""
+    try:
+        q = request.GET.get('q', '').strip()
+        
+        if len(q) < 2:
+            return JsonResponse({
+                'success': True,
+                'clientes': []
+            })
+        
+        clientes = Cliente.objects.filter(
+            Q(nombres__icontains=q) |
+            Q(apellidos__icontains=q) |
+            Q(identificacion__icontains=q) |
+            Q(telefono__icontains=q)
+        ).exclude(
+            identificacion='9999999999'
+        )[:10]
+        
+        clientes_data = []
+        for cliente in clientes:
+            clientes_data.append({
+                'id': cliente.id,
+                'nombre_completo': f"{cliente.nombres} {cliente.apellidos}".strip(),
+                'identificacion': cliente.identificacion,
+                'telefono': cliente.telefono or '',
+                'email': cliente.email or ''
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'clientes': clientes_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': f'Error: {str(e)}'})
+
+# ========== NUEVAS APIS PARA IMPRESIÓN DE TICKETS TÉRMICOS ==========
+
+@login_required
+def api_impresoras_disponibles(request):
+    """API para obtener impresoras disponibles en el sistema"""
+    try:
+        printers = TicketThermalService.get_available_printers()
+        
+        return JsonResponse({
+            'success': True,
+            'printers': printers,
+            'message': f'Se encontraron {len(printers)} impresoras'
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False, 
+            'printers': [],
+            'message': f'Error al obtener impresoras: {str(e)}'
+        })
+
+@login_required
+def api_trabajos_pendientes(request):
+    """API para obtener el estado de los trabajos de impresión del usuario actual"""
+    try:
+        from hardware_integration.models import TrabajoImpresion
+        from django.utils import timezone
+        
+        # Obtener trabajos de las últimas 2 horas
+        hace_2_horas = timezone.now() - timezone.timedelta(hours=2)
+        
+        trabajos = TrabajoImpresion.objects.filter(
+            usuario=request.user,
+            fecha_creacion__gte=hace_2_horas
+        ).order_by('-fecha_creacion')[:10]
+        
+        data = []
+        for t in trabajos:
+            data.append({
+                'id': t.id,
+                'impresora': t.impresora_nombre,
+                'tipo': t.tipo,
+                'estado': t.estado,
+                'fecha': t.fecha_creacion.strftime('%H:%M:%S'),
+                'error': t.mensaje_error
+            })
+            
+        return JsonResponse({
+            'success': True,
+            'trabajos': data,
+            'count_pendientes': sum(1 for t in data if t['estado'] == 'PENDIENTE')
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)})
+
+@login_required
+@require_POST
+def api_probar_impresora(request):
+    """API para enviar un ticket de prueba a una impresora o imprimir una venta específica"""
+    try:
+        data = json.loads(request.body)
+        printer_name = data.get('printer_name')
+        printer_type = data.get('printer_type', 'GENERIC_80MM')
+        venta_id = data.get('venta_id') or data.get('id')
+        open_drawer = data.get('open_drawer', False)
+        
+        if not printer_name:
+            return JsonResponse({'success': False, 'message': 'Nombre de impresora requerido'})
+        
+        if venta_id:
+            # Si hay un ID de venta, imprimir la venta real
+            venta = obtener_venta_por_id_o_numero(venta_id)
+            success, message = TicketThermalService.print_ticket(
+                venta, 
+                printer_name, 
+                printer_type, 
+                open_drawer,
+                user=request.user
+            )
+        else:
+            # Si no hay ID de venta, es un ticket de prueba
+            success, message = TicketThermalService.test_printer(
+                printer_name, 
+                printer_type,
+                user=request.user
+            )
+        
+        return JsonResponse({
+            'success': success,
+            'message': message
+        })
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error en api_probar_impresora: {e}")
+        logger.error(traceback.format_exc())
+        return JsonResponse({
+            'success': False,
+            'message': f'Error al procesar impresión: {str(e)}'
+        })
+
+@login_required
+@transaction.atomic
+def api_procesar_venta_pos_mejorado(request):
+    """API mejorada para procesar venta desde el POS con opciones de impresión"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Método no permitido'})
+    
+    try:
+        data = json.loads(request.body)
+        
+        # Permitir venta si hay items O si hay una orden de trabajo
+        order_id = data.get('order_id')
+        items_recibidos = data.get('items', [])
+        
+        if not items_recibidos and not order_id:
+            return JsonResponse({'success': False, 'message': 'No hay productos en la venta ni orden de trabajo'})
+        
+        # Obtener cliente (soporte para 'customer_id' o 'cliente_id')
+        cliente_id = data.get('customer_id') or data.get('cliente_id')
+        cliente = None
+        if cliente_id:
+            try:
+                cliente = Cliente.objects.get(id=cliente_id)
+            except Cliente.DoesNotExist:
+                return JsonResponse({'success': False, 'message': 'Cliente no encontrado'})
+        else:
+            cliente = Cliente.get_consumidor_final()
+        
+        # Crear la venta
+        venta = Venta.objects.create(
+            cliente=cliente,
+            usuario=request.user,
+            subtotal=Decimal(str(data.get('subtotal', '0.00'))),
+            iva=Decimal(str(data.get('tax_amount', '0.00'))),
+            descuento=Decimal(str(data.get('discount_amount', '0.00'))),
+            total=Decimal(str(data.get('total_amount', '0.00'))),
+            tipo_pago=data.get('payment_method', 'EFECTIVO'),
+            observaciones=data.get('observaciones', '')
+        )
+        
+        # Procesar items de la venta
+        for item in items_recibidos:
+            if item['type'] == 'product':
+                try:
+                    producto = Producto.objects.get(id=item['id'])
+                    cantidad = Decimal(str(item['quantity']))
+                    
+                    if producto.stock_actual < cantidad:
+                        raise Exception(f'Stock insuficiente para {producto.nombre}. Disponible: {producto.stock_actual}')
+                    
+                    subtotal_item = Decimal(str(item['subtotal']))
+                    iva_item = Decimal(str(item.get('iva', '0.00'))) # Usar el IVA enviado por el POS
+                    total_item = Decimal(str(item['total']))
+                    
+                    DetalleVenta.objects.create(
+                        venta=venta,
+                        producto=producto,
+                        nombre_personalizado=item.get('name') if producto.es_editable else None,
+                        cantidad=cantidad,
+                        precio_unitario=Decimal(str(item['unit_price'])),
+                        subtotal=subtotal_item,
+                        iva_porcentaje=Decimal('15.00'),
+                        iva=iva_item,
+                        descuento=Decimal(str(item.get('discount', '0.00'))),
+                        total=total_item
+                    )
+                    
+                    producto.stock_actual -= cantidad
+                    producto.save()
+                    
+                except Producto.DoesNotExist:
+                    raise Exception(f'Producto ID {item["id"]} no encontrado')
+            
+            elif item['type'] == 'service':
+                subtotal_item = Decimal(str(item['subtotal']))
+                iva_item = Decimal('0.00')
+                total_item = subtotal_item - Decimal(str(item.get('discount', '0.00')))
+                
+                DetalleVenta.objects.create(
+                    venta=venta,
+                    nombre_personalizado=item.get('name', 'Servicio'),
+                    cantidad=Decimal(str(item['quantity'])),
+                    precio_unitario=Decimal(str(item['unit_price'])),
+                    subtotal=subtotal_item,
+                    iva_porcentaje=Decimal('0.00'),
+                    iva=iva_item,
+                    descuento=Decimal(str(item.get('discount', '0.00'))),
+                    total=total_item,
+                    es_servicio=True
+                )
+            
+            elif item['type'] == 'manual':
+                # Item personalizado/genérico sin catálogo
+                subtotal_item = Decimal(str(item['subtotal']))
+                iva_item = Decimal('0.00') # Manuales asumen servicio por defecto
+                total_item = subtotal_item
+                
+                DetalleVenta.objects.create(
+                    venta=venta,
+                    nombre_personalizado=item.get('name', 'Servicio Manual'),
+                    cantidad=Decimal(str(item['quantity'])),
+                    precio_unitario=Decimal(str(item['unit_price'])),
+                    subtotal=subtotal_item,
+                    iva_porcentaje=Decimal('0.00'),
+                    iva=iva_item,
+                    descuento=Decimal('0.00'),
+                    total=total_item,
+                    es_servicio=True
+                )
+        
+        # ⭐ INTEGRACIÓN: Facturación Electrónica SRI (Selective)
+        if data.get('facturar_electronica', False):
+            try:
+                # Buscar punto de emisión activo
+                punto = PuntoEmision.objects.filter(activo=True).first()
+                if not punto:
+                    # Si no hay punto activo, registramos el error pero no bloqueamos la venta
+                    logger.error("No hay punto de emisión activo para facturación electrónica")
+                else:
+                    comprobante = ComprobanteElectronico.objects.create(
+                        venta=venta,
+                        punto_emision=punto,
+                        ambiente=punto.configuracion.ambiente if (punto.configuracion) else 1,
+                        estado='GENERADO'
+                    )
+                    # Disparar tarea de facturación electrónica en un hilo de fondo (asíncrono)
+                    # Esto evita requerir un daemon Celery activo en la infraestructura
+                    import threading
+                    from django.db import connection
+
+                    def ejecutar_procesamiento_seguro(comp_id):
+                        try:
+                            procesar_factura_electronica(comp_id)
+                        finally:
+                            # Cerrar la conexión a la base de datos en este hilo
+                            connection.close()
+
+                    threading.Thread(
+                        target=ejecutar_procesamiento_seguro,
+                        args=(comprobante.id,),
+                        daemon=True
+                    ).start()
+                    logger.info(f"Hilo de facturación electrónica iniciado para venta {venta.id}")
+            except Exception as e:
+                logger.error(f"Error al iniciar facturación electrónica: {str(e)}")
+
+        # Procesar opciones de impresión
+        print_result = None
+        email_sent = False
+        
+        print_options = data.get('print_options', {})
+        
+        if print_options.get('printOption') == 'ticket' and print_options.get('printer'):
+            try:
+                printer_config = print_options['printer']
+                printer_name = printer_config['name']
+                printer_type = printer_config['type']
+                open_drawer = print_options.get('openDrawer', False)
+                
+                success, message = TicketThermalService.print_ticket(
+                    venta, 
+                    printer_name, 
+                    printer_type, 
+                    open_drawer
+                )
+                
+                print_result = {
+                    'success': success,
+                    'message': message,
+                    'type': 'ticket'
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Error en el flujo de impresión POS: {str(e)}", exc_info=True)
+                print_result = {
+                    'success': False,
+                    'message': f'Error al imprimir ticket: {str(e)}',
+                    'type': 'ticket'
+                }
+        
+        elif print_options.get('printOption') == 'invoice':
+            try:
+                # IMPORT LOCAL AQUÍ:
+                from .services.factura_service import FacturaService
+                
+                FacturaService.imprimir_factura(venta)
+                print_result = {
+                    'success': True,
+                    'message': 'Factura enviada a impresora',
+                    'type': 'invoice'
+                }
+            except Exception as e:
+                print_result = {
+                    'success': False,
+                    'message': f'Error al imprimir factura: {str(e)}',
+                    'type': 'invoice'
+                }
+        
+        # Enviar email si se solicita y el cliente tiene email
+        if print_options.get('sendEmail') and cliente.email:
+            try:
+                # Aquí puedes implementar el envío de email
+                # email_service.send_invoice_email(venta, cliente.email)
+                email_sent = True
+            except Exception as e:
+                print(f"Error enviando email: {e}")
+        
+        return JsonResponse({
+            'success': True,
+            'venta_id': venta.id,
+            'invoice_number': venta.numero_factura,
+            'message': 'Venta procesada correctamente',
+            'print_result': print_result,
+            'email_sent': email_sent
+        })
+        
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)})
+
+@login_required
+@transaction.atomic
+def api_procesar_venta_pos(request):
+    """Redireccionar a la nueva función mejorada"""
+    return api_procesar_venta_pos_mejorado(request)
+
+@login_required
+@require_POST
+def imprimir_ticket_venta(request, venta_id=None):
+    """Imprime un ticket térmico de una venta existente"""
+    try:
+        # El venta_id puede venir en la URL o en el cuerpo JSON
+        if request.content_type == 'application/json':
+            data = json.loads(request.body)
+        else:
+            # Soporte legacy para FormData
+            data = request.POST
+            
+        final_venta_id = venta_id or data.get('venta_id') or data.get('id')
+        if not final_venta_id:
+            return JsonResponse({'success': False, 'message': 'ID de venta no proporcionado'})
+
+        venta = obtener_venta_por_id_o_numero(final_venta_id)
+        
+        printer_name = data.get('printer_name') or data.get('impresora_id')
+        printer_type = data.get('printer_type') or data.get('tipo_impresora') or 'GENERIC_80MM'
+        open_drawer = str(data.get('open_drawer', '')).lower() in ['true', '1', 'on']
+        
+        if not printer_name:
+            return JsonResponse({
+                'success': False,
+                'message': 'Nombre de impresora requerido'
+            })
+        
+        success, message = TicketThermalService.print_ticket(
+            venta, 
+            printer_name, 
+            printer_type, 
+            open_drawer,
+            user=request.user
+        )
+        
+        return JsonResponse({
+            'success': success,
+            'message': message
+        })
+        
+    except Exception as e:
+        logger.error(f"Error en imprimir_ticket_venta: {e}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'Error al imprimir ticket: {str(e)}'
+        })
+
+@login_required
+def preview_ticket(request, venta_id):
+    """Muestra una vista previa del ticket en texto plano"""
+    try:
+        venta = obtener_venta_por_id_o_numero(venta_id)
+        printer_type = request.GET.get('type', 'GENERIC_80MM')
+        
+        content = TicketThermalService.generate_ticket_content(venta, printer_type)
+        
+        return HttpResponse(content, content_type='text/plain; charset=utf-8')
+        
+    except Exception as e:
+        return HttpResponse(f'Error generando preview: {str(e)}', status=500)
+
+# ========== FUNCIONES ADICIONALES PARA CONFIGURACIÓN ==========
+
+@login_required
+def configuracion_impresoras(request):
+    """Vista para configurar impresoras del sistema"""
+    printers = TicketThermalService.get_available_printers()
+    
+    context = {
+        'active_page': 'configuracion',
+        'printers': printers,
+        'printer_types': TicketThermalService.THERMAL_PRINTERS
+    }
+    
+    return render(request, 'ventas/configuracion_impresoras.html', context)
+
+@login_required
+@require_POST
+def guardar_configuracion_impresora(request):
+    """Guardar configuración de impresora por defecto"""
+    try:
+        printer_name = request.POST.get('printer_name')
+        printer_type = request.POST.get('printer_type')
+        auto_open_drawer = request.POST.get('auto_open_drawer') == 'on'
+        
+        # Guardar en configuración del usuario o sistema
+        # Aquí puedes implementar la lógica para guardar las preferencias
+        
+        messages.success(request, 'Configuración de impresora guardada correctamente')
+        return redirect('ventas:configuracion_impresoras')
+        
+    except Exception as e:
+        messages.error(request, f'Error al guardar configuración: {str(e)}')
+        return redirect('ventas:configuracion_impresoras')
+
+# ========== VISTAS DE IMPRESIÓN Y CIERRE ==========
+
+@login_required
+def factura_pdf(request):
+    """Genera PDF de factura para descarga"""
+    identificador = request.GET.get('id')
+    if not identificador:
+        messages.error(request, 'ID de venta requerido')
+        return redirect('ventas:lista_ventas')
+    
+    try:
+        # IMPORT LOCAL AQUÍ:
+        from .services.factura_service import FacturaService
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        venta = obtener_venta_por_id_o_numero(identificador)
+        logger.info(f"Generando PDF para venta ID: {venta.id}, Número: {venta.numero_factura}")
+        
+        # ⭐ USAR EL SERVICIO SIMPLIFICADO
+        try:
+            pdf_file = FacturaService.generar_pdf(venta)
+            
+            response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="factura_{venta.numero_factura}.pdf"'
+            
+            logger.info(f"PDF de factura {venta.numero_factura} generado exitosamente")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generando PDF: {str(e)}")
+            messages.error(request, f'Error al generar PDF: {str(e)}')
+            return redirect('ventas:detalle_venta', venta_id=venta.id)
+        
+    except Exception as e:
+        logger.error(f"Error general en factura_pdf: {str(e)}", exc_info=True)
+        messages.error(request, f'Error al generar PDF: {str(e)}')
+        return redirect('ventas:lista_ventas')
+
+@login_required
+@require_POST
+def imprimir_factura(request):
+    """Imprime una factura"""
+    identificador = request.GET.get('id')
+    if not identificador:
+        return JsonResponse({'success': False, 'resultado': 'ID de venta requerido'})
+    
+    try:
+        # IMPORT LOCAL AQUÍ:
+        from .services.factura_service import FacturaService
+        
+        venta = obtener_venta_por_id_o_numero(identificador)
+        impresora = request.POST.get('impresora')
+        
+        success, result = FacturaService.imprimir_factura(venta, impresora)
+        
+        return JsonResponse({
+            'success': success,
+            'resultado': result
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'resultado': f'Error: {str(e)}'
+        })
+
+@login_required
+def imprimir_ticket(request):
+    """View to print a receipt (ticket) via the local hardware agent"""
+    if request.method == 'POST':
+        identificador = request.POST.get('id') or request.GET.get('id')
+        impresora_id = request.POST.get('impresora_id') or request.POST.get('impresora')
+    else:
+        identificador = request.GET.get('id')
+        impresora_id = request.GET.get('impresora_id')
+
+    if not identificador:
+        return JsonResponse({'success': False, 'message': 'ID de venta requerido'})
+    
+    try:
+        from .services.factura_service import FacturaService
+        venta = obtener_venta_por_id_o_numero(identificador)
+        
+        success, message = FacturaService.imprimir_ticket(venta, impresora_id)
+        
+        return JsonResponse({
+            'success': success,
+            'message': message,
+            'resultado': message # Compatibility
+        })
+        
+    except Exception as e:
+        logger.exception("Error en vista imprimir_ticket")
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def lista_cierres(request):
+    """Muestra la lista de cierres de caja"""
+    cierres = CierreCaja.objects.all().select_related('usuario')
+    
+    return render(request, 'ventas/lista_cierres.html', {
+        'active_page': 'ventas',
+        'cierres': cierres
+    })
+
+@login_required
+def crear_cierre(request):
+    """Crea un nuevo cierre de caja"""
+    if request.method == 'POST':
+        form = CierreCajaForm(request.POST)
+        if form.is_valid():
+            cierre = form.save(commit=False)
+            cierre.usuario = request.user
+            cierre.save()
+            
+            messages.success(request, "Cierre de caja registrado correctamente")
+            return redirect('ventas:lista_cierres')
+    else:
+        form = CierreCajaForm(initial={'fecha': timezone.localdate()})
+    
+    ventas_dia = Venta.get_ventas_por_dia()
+    
+    return render(request, 'ventas/cierre_form.html', {
+        'active_page': 'ventas',
+        'form': form,
+        'ventas_dia': ventas_dia
+    })
+
+@login_required
+def api_dashboard_stats(request):
+    """API para obtener estadísticas actualizadas del dashboard"""
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    
+    try:
+        hoy_start = timezone.make_aware(datetime.combine(today, time.min))
+        hoy_end = timezone.make_aware(datetime.combine(today, time.max))
+        ayer_start = timezone.make_aware(datetime.combine(yesterday, time.min))
+        ayer_end = timezone.make_aware(datetime.combine(yesterday, time.max))
+        
+        # Ventas de hoy
+        ventas_hoy = Venta.objects.filter(
+            fecha_hora__range=(hoy_start, hoy_end),
+            estado='COMPLETADA'
+        )
+        
+        ventas_ayer = Venta.objects.filter(
+            fecha_hora__range=(ayer_start, ayer_end),
+            estado='COMPLETADA'
+        )
+        
+        total_ventas_hoy = ventas_hoy.count()
+        total_ventas_ayer = ventas_ayer.count()
+        
+        ingresos_hoy = ventas_hoy.aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+        ingresos_ayer = ventas_ayer.aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+        
+        # Cálculo de crecimiento
+        crecimiento_ventas = 0
+        if total_ventas_ayer > 0:
+            crecimiento_ventas = ((total_ventas_hoy - total_ventas_ayer) / total_ventas_ayer) * 100
+        
+        crecimiento_ingresos = 0
+        if ingresos_ayer > 0:
+            crecimiento_ingresos = ((float(ingresos_hoy) - float(ingresos_ayer)) / float(ingresos_ayer)) * 100
+        
+        # Órdenes pendientes
+        ordenes_pendientes = OrdenTrabajo.objects.filter(
+            estado='PENDIENTE',
+            facturado=False
+        ).count()
+        
+        # Productos bajo stock
+        productos_bajo_stock = Producto.objects.filter(
+            stock_actual__lte=5,
+            activo=True
+        ).count()
+        
+        # Ticket promedio
+        ticket_promedio = 0
+        if total_ventas_hoy > 0:
+            ticket_promedio = float(ingresos_hoy) / total_ventas_hoy
+        
+        return JsonResponse({
+            'success': True,
+            'stats': {
+                'ventas_hoy': total_ventas_hoy,
+                'ingresos_hoy': float(ingresos_hoy),
+                'ordenes_pendientes': ordenes_pendientes,
+                'productos_bajo_stock': productos_bajo_stock,
+                'ticket_promedio': ticket_promedio,
+                'crecimiento_ventas': crecimiento_ventas,
+                'crecimiento_ingresos': crecimiento_ingresos,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def api_todas_ventas(request):
+    """API para obtener todas las ventas con filtros"""
+    try:
+        ventas = Venta.objects.all().select_related('cliente')
+        
+        # Aplicar filtros
+        fecha_inicio = request.GET.get('fecha_inicio')
+        fecha_fin = request.GET.get('fecha_fin')
+        estado = request.GET.get('estado')
+        
+        if fecha_inicio:
+            try:
+                fecha_inicio_date = datetime.strptime(fecha_inicio, '%Y-%m-%d').date()
+                inicio_dt = timezone.make_aware(datetime.combine(fecha_inicio_date, time.min))
+                ventas = ventas.filter(fecha_hora__gte=inicio_dt)
+            except (ValueError, TypeError):
+                pass
+        
+        if fecha_fin:
+            try:
+                fecha_fin_date = datetime.strptime(fecha_fin, '%Y-%m-%d').date()
+                fin_dt = timezone.make_aware(datetime.combine(fecha_fin_date, time.max))
+                ventas = ventas.filter(fecha_hora__lte=fin_dt)
+            except (ValueError, TypeError):
+                pass
+        
+        if estado:
+            ventas = ventas.filter(estado=estado)
+        
+        # Limitar resultados
+        ventas = ventas.order_by('-fecha_hora')[:50]
+        
+        ventas_data = []
+        for venta in ventas:
+            cliente_nombre = 'Consumidor Final'
+            if venta.cliente.identificacion != '9999999999':
+                cliente_nombre = f"{venta.cliente.nombres} {venta.cliente.apellidos}".strip()
+            
+            ventas_data.append({
+                'id': venta.id,
+                'numero_factura': venta.numero_factura,
+                'cliente_nombre': cliente_nombre,
+                'fecha_hora': timezone.localtime(venta.fecha_hora).strftime('%d/%m/%Y %H:%M'),
+                'total': float(venta.total),
+                'estado': venta.estado,
+                'tipo_pago': venta.get_tipo_pago_display()
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'ventas': ventas_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def api_grafico_ventas(request):
+    """API para obtener datos del gráfico de ventas por período"""
+    try:
+        periodo = request.GET.get('periodo', '7d')
+        today = timezone.localdate()
+        
+        if periodo == '7d':
+            dias = 7
+            labels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+        elif periodo == '30d':
+            dias = 30
+            labels = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4']
+        elif periodo == '90d':
+            dias = 90
+            labels = ['Mes 1', 'Mes 2', 'Mes 3']
+        else:
+            dias = 7
+            labels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+        
+        datos = []
+        
+        if periodo == '7d':
+            # Datos diarios
+            for i in range(7):
+                fecha = today - timedelta(days=6-i)
+                ventas_dia = Venta.objects.filter(
+                    fecha_hora__date=fecha,
+                    estado='COMPLETADA'
+                ).aggregate(
+                    total=Sum('total'),
+                    cantidad=Count('id')
+                )
+                
+                datos.append({
+                    'fecha': fecha.strftime('%Y-%m-%d'),
+                    'dia': labels[i],
+                    'total': float(ventas_dia['total'] or 0),
+                    'cantidad': ventas_dia['cantidad'] or 0
+                })
+        
+        elif periodo == '30d':
+            # Datos semanales
+            for i in range(4):
+                fecha_fin = today - timedelta(days=i*7)
+                fecha_inicio = fecha_fin - timedelta(days=6)
+                
+                ventas_semana = Venta.objects.filter(
+                    fecha_hora__date__range=[fecha_inicio, fecha_fin],
+                    estado='COMPLETADA'
+                ).aggregate(
+                    total=Sum('total'),
+                    cantidad=Count('id')
+                )
+                
+                datos.append({
+                    'fecha': fecha_fin.strftime('%Y-%m-%d'),
+                    'periodo': labels[3-i],
+                    'total': float(ventas_semana['total'] or 0),
+                    'cantidad': ventas_semana['cantidad'] or 0
+                })
+        
+        elif periodo == '90d':
+            # Datos mensuales
+            for i in range(3):
+                fecha_fin = today - timedelta(days=i*30)
+                fecha_inicio = fecha_fin - timedelta(days=29)
+                
+                ventas_mes = Venta.objects.filter(
+                    fecha_hora__date__range=[fecha_inicio, fecha_fin],
+                    estado='COMPLETADA'
+                ).aggregate(
+                    total=Sum('total'),
+                    cantidad=Count('id')
+                )
+                
+                datos.append({
+                    'fecha': fecha_fin.strftime('%Y-%m-%d'),
+                    'periodo': labels[2-i],
+                    'total': float(ventas_mes['total'] or 0),
+                    'cantidad': ventas_mes['cantidad'] or 0
+                })
+        
+        return JsonResponse({
+            'success': True,
+            'datos': datos,
+            'periodo': periodo
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def api_productos_top(request):
+    """API para obtener productos más vendidos"""
+    try:
+        periodo_dias = int(request.GET.get('dias', 7))
+        fecha_inicio = timezone.localdate() - timedelta(days=periodo_dias)
+        
+        productos = DetalleVenta.objects.filter(
+            venta__fecha_hora__date__gte=fecha_inicio,
+            venta__estado='COMPLETADA',
+            producto__isnull=False
+        ).values(
+            'producto__id',
+            'producto__nombre',
+            'producto__codigo_unico'
+        ).annotate(
+            total_vendido=Sum('cantidad'),
+            ingresos=Sum('total'),
+            veces_vendido=Count('venta', distinct=True)
+        ).order_by('-total_vendido')[:10]
+        
+        productos_data = []
+        for producto in productos:
+            productos_data.append({
+                'id': producto['producto__id'],
+                'nombre': producto['producto__nombre'],
+                'codigo': producto['producto__codigo_unico'],
+                'total_vendido': float(producto['total_vendido']),
+                'ingresos': float(producto['ingresos']),
+                'veces_vendido': producto['veces_vendido']
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'productos': productos_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def api_resumen_mensual(request):
+    """API para obtener resumen mensual de ventas"""
+    try:
+        today = timezone.localdate()
+        primer_dia_mes = today.replace(day=1)
+        
+        # Ventas del mes actual
+        ventas_mes = Venta.objects.filter(
+            fecha_hora__date__gte=primer_dia_mes,
+            estado='COMPLETADA'
+        ).aggregate(
+            total_ventas=Count('id'),
+            total_ingresos=Sum('total'),
+            ticket_promedio=Avg('total')
+        )
+        
+        # Ventas del mes anterior para comparación
+        if primer_dia_mes.month == 1:
+            mes_anterior = primer_dia_mes.replace(year=primer_dia_mes.year-1, month=12)
+        else:
+            mes_anterior = primer_dia_mes.replace(month=primer_dia_mes.month-1)
+        
+        ventas_mes_anterior = Venta.objects.filter(
+            fecha_hora__date__gte=mes_anterior,
+            fecha_hora__date__lt=primer_dia_mes,
+            estado='COMPLETADA'
+        ).aggregate(
+            total_ventas=Count('id'),
+            total_ingresos=Sum('total')
+        )
+        
+        # Calcular crecimiento
+        crecimiento_ventas = 0
+        crecimiento_ingresos = 0
+        
+        if ventas_mes_anterior['total_ventas']:
+            crecimiento_ventas = ((ventas_mes['total_ventas'] - ventas_mes_anterior['total_ventas']) / ventas_mes_anterior['total_ventas']) * 100
+        
+        if ventas_mes_anterior['total_ingresos']:
+            crecimiento_ingresos = ((float(ventas_mes['total_ingresos'] or 0) - float(ventas_mes_anterior['total_ingresos'])) / float(ventas_mes_anterior['total_ingresos'])) * 100
+        
+        return JsonResponse({
+            'success': True,
+            'resumen': {
+                'total_ventas': ventas_mes['total_ventas'] or 0,
+                'total_ingresos': float(ventas_mes['total_ingresos'] or 0),
+                'ticket_promedio': float(ventas_mes['ticket_promedio'] or 0),
+                'crecimiento_ventas': crecimiento_ventas,
+                'crecimiento_ingresos': crecimiento_ingresos,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@login_required
+def detalle_venta(request, venta_id):
+    """Muestra el detalle de una venta"""
+    venta = get_object_or_404(Venta, pk=venta_id)
+    detalles = venta.detalleventa_set.all().select_related('producto', 'tipo_servicio')
+    
+    return render(request, 'ventas/detalle_venta.html', {
+        'active_page': 'ventas',
+        'venta': venta,
+        'detalles': detalles
+    })
+
+@login_required
+def api_productos_populares(request):
+    """API para obtener productos más populares/vendidos"""
+    try:
+        limit = int(request.GET.get('limit', 12))
+        
+        # Obtener productos más vendidos en los últimos 30 días
+        from datetime import timedelta
+        fecha_limite = timezone.localdate() - timedelta(days=30)
+        
+        productos_populares = DetalleVenta.objects.filter(
+            venta__fecha_hora__date__gte=fecha_limite,
+            venta__estado='COMPLETADA',
+            producto__isnull=False
+        ).values(
+            'producto__id',
+            'producto__codigo_unico',
+            'producto__codigo_barras', 
+            'producto__nombre',
+            'producto__precio_venta',
+            'producto__stock_actual',
+            'producto__categoria__nombre'
+        ).annotate(
+            total_vendido=Sum('cantidad')
+        ).order_by('-total_vendido')[:limit]
+        
+        productos_data = []
+        for item in productos_populares:
+            productos_data.append({
+                'id': item['producto__id'],
+                'codigo': item['producto__codigo_unico'] or item['producto__codigo_barras'] or '',
+                'nombre': item['producto__nombre'],
+                'precio': float(item['producto__precio_venta']),
+                'stock': float(item['producto__stock_actual']),
+                'categoria': item['producto__categoria__nombre'],
+                'total_vendido': float(item['total_vendido'])
+            })
+        
+        # Si no hay suficientes productos populares, completar con productos activos
+        if len(productos_data) < limit:
+            productos_activos = Producto.objects.filter(
+                activo=True,
+                stock_actual__gt=0
+            ).exclude(
+                id__in=[p['id'] for p in productos_data]
+            ).select_related('categoria')[:limit - len(productos_data)]
+            
+            for producto in productos_activos:
+                productos_data.append({
+                    'id': producto.id,
+                    'codigo': producto.codigo_unico or producto.codigo_barras or '',
+                    'nombre': producto.nombre,
+                    'precio': float(producto.precio_venta),
+                    'stock': float(producto.stock_actual),
+                    'categoria': producto.categoria.nombre if producto.categoria else None,
+                    'total_vendido': 0
+                })
+        
+        return JsonResponse({
+            'success': True,
+            'productos': productos_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False, 
+            'message': f'Error: {str(e)}',
+            'productos': []
+        })
+@login_required
+@require_POST
+def marcar_pago_verificado(request, pedido_id):
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    pedido.estado_pago = 'PAGADO'
+    pedido.save()
+    messages.success(request, f'Pago del pedido #{pedido.numero_orden} verificado.')
+    return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+@csrf_exempt
+@requiere_token_api
+def api_crear_pedido_online(request):
+    """
+    Crea un pedido online desde la tienda PHP.
+
+    POST /ventas/api/publica/pedidos/crear/
+    Authorization: Bearer <token>
+
+    Body JSON:
+    {
+        "nombres": "Juan",
+        "apellidos": "Pérez",
+        "cedula": "1234567890",
+        "telefono": "0999999999",
+        "email": "juan@email.com",
+        "tipo_entrega": "RETIRO" | "SERVIENTREGA",
+        "direccion_envio": "...",
+        "ciudad_envio": "...",
+        "provincia_envio": "...",
+        "referencia_envio": "...",
+        "metodo_pago": "PAYPHONE" | "TRANSFERENCIA" | "CONTRA_ENTREGA",
+        "numero_comprobante": "TRF-2025-001",
+        "comprobante_base64": "data:image/jpeg;base64,/9j/...",
+        "banco_origen": "Banco Pichincha",
+        "items": [
+            { "producto_id": 1, "cantidad": 2, "precio_unitario": 4.20 }
+        ],
+        "costo_envio": 5.00,
+        "descuento": 0,
+        "observaciones": "..."
+    }
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Método no permitido'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'JSON inválido'}, status=400)
+
+    # ── Validación de campos obligatorios ─────────────────────────
+    required = ['nombres', 'apellidos', 'cedula', 'telefono', 'tipo_entrega', 'metodo_pago', 'items']
+    for field in required:
+        if not data.get(field):
+            return JsonResponse({'success': False, 'error': f'Campo requerido: {field}'}, status=400)
+
+    if data['tipo_entrega'] == 'SERVIENTREGA' and not data.get('direccion_envio'):
+        return JsonResponse({
+            'success': False,
+            'error': 'Dirección de envío requerida para Servientrega'
+        }, status=400)
+
+    # ── Validación específica para TRANSFERENCIA ───────────────────
+    if data['metodo_pago'] == 'TRANSFERENCIA':
+        if not data.get('numero_comprobante'):
+            return JsonResponse({
+                'success': False,
+                'error': 'El número de comprobante es requerido para pagos por transferencia'
+            }, status=400)
+
+    if not data.get('items'):
+        return JsonResponse({'success': False, 'error': 'El pedido no tiene productos'}, status=400)
+
+    # ── Procesar imagen base64 del comprobante ─────────────────────
+    comprobante_base64_limpio = ''
+    comprobante_content_type = ''
+
+    if data.get('comprobante_base64'):
+        raw = data['comprobante_base64'].strip()
+        try:
+            if ',' in raw and raw.startswith('data:'):
+                # Formato completo: "data:image/jpeg;base64,/9j/..."
+                header, encoded = raw.split(',', 1)
+                content_type = header.split(':')[1].split(';')[0].strip()
+            else:
+                # Base64 puro sin header
+                encoded = raw
+                content_type = ''
+
+            # Validar tipo de imagen permitido
+            allowed_types = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+            if content_type and content_type not in allowed_types:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Tipo de imagen no permitido: {content_type}. Use JPEG, PNG, WEBP o GIF'
+                }, status=400)
+
+            # Decodificar para validar
+            decoded = base64.b64decode(encoded)
+
+            # Validar tamaño máximo 5MB
+            if len(decoded) > 5 * 1024 * 1024:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'La imagen del comprobante no puede superar 5MB'
+                }, status=400)
+
+            # Detectar tipo real
+            detected = imghdr.what(None, decoded)
+            if not detected:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'El archivo enviado no es una imagen válida'
+                }, status=400)
+
+            if not content_type:
+                content_type = f'image/{detected}'
+
+            comprobante_base64_limpio = encoded
+            comprobante_content_type = content_type
+
+        except Exception:
+            return JsonResponse({
+                'success': False,
+                'error': 'comprobante_base64 inválido. Use formato: data:image/jpeg;base64,<datos>'
+            }, status=400)
+
+    # ── Verificar stock ───────────────────────────────────────────
+    items_procesados = []
+    errores_stock = []
+
+    for item in data['items']:
+        try:
+            producto = Producto.objects.get(id=item['producto_id'], activo=True)
+            cantidad = int(item['cantidad'])
+            if producto.stock_actual < cantidad:
+                errores_stock.append(
+                    f"{producto.nombre}: disponible {int(producto.stock_actual)}, solicitado {cantidad}"
+                )
+            else:
+                items_procesados.append({
+                    'producto': producto,
+                    'cantidad': cantidad,
+                    'precio_unitario': Decimal(str(item.get('precio_unitario', producto.precio_venta))),
+                })
+        except Producto.DoesNotExist:
+            errores_stock.append(f"Producto ID {item.get('producto_id')} no encontrado")
+
+    if errores_stock:
+        return JsonResponse({
+            'success': False,
+            'error': 'Stock insuficiente o producto no encontrado',
+            'detalle': errores_stock
+        }, status=400)
+
+    # ── Calcular totales ──────────────────────────────────────────
+    subtotal = sum(i['precio_unitario'] * i['cantidad'] for i in items_procesados)
+    costo_envio = Decimal(str(data.get('costo_envio', 0)))
+    descuento = Decimal(str(data.get('descuento', 0)))
+    total = subtotal + costo_envio - descuento
+
+    # ── Crear pedido en transacción ───────────────────────────────
+    try:
+        with transaction.atomic():
+            pedido = PedidoOnline.objects.create(
+                nombres_comprador=data['nombres'],
+                apellidos_comprador=data['apellidos'],
+                cedula_comprador=data['cedula'],
+                telefono_comprador=data['telefono'],
+                email_comprador=data.get('email', ''),
+                tipo_entrega=data['tipo_entrega'],
+                direccion_envio=data.get('direccion_envio', ''),
+                ciudad_envio=data.get('ciudad_envio', ''),
+                provincia_envio=data.get('provincia_envio', ''),
+                referencia_envio=data.get('referencia_envio', ''),
+                metodo_pago=data['metodo_pago'],
+                # ── Datos de transferencia ────────────────────────
+                numero_comprobante=data.get('numero_comprobante', ''),
+                banco_origen=data.get('banco_origen', ''),
+                comprobante_base64=comprobante_base64_limpio,
+                comprobante_content_type=comprobante_content_type,
+                # ─────────────────────────────────────────────────
+                subtotal=subtotal,
+                costo_envio=costo_envio,
+                descuento=descuento,
+                total=total,
+                observaciones=data.get('observaciones', ''),
+            )
+
+            for item in items_procesados:
+                DetallePedidoOnline.objects.create(
+                    pedido=pedido,
+                    producto=item['producto'],
+                    nombre_producto=item['producto'].nombre,
+                    codigo_producto=item['producto'].codigo_unico,
+                    cantidad=item['cantidad'],
+                    precio_unitario=item['precio_unitario'],
+                    subtotal=item['precio_unitario'] * item['cantidad'],
+                    total=item['precio_unitario'] * item['cantidad'],
+                )
+                item['producto'].stock_actual -= item['cantidad']
+                item['producto'].save()
+
+        numero_tienda = os.environ.get('WHATSAPP_TIENDA', '593999999999')
+
+        return JsonResponse({
+            'success': True,
+            'numero_orden': pedido.numero_orden,
+            'total': float(pedido.total),
+            'estado': pedido.estado,
+            'whatsapp_url': pedido.get_whatsapp_url(numero_tienda),
+            'mensaje': f'Pedido #{pedido.numero_orden} creado correctamente',
+        }, status=201)
+
+    except Exception as e:
+        logger.error(f"Error creando pedido online: {e}", exc_info=True)
+        return JsonResponse({'success': False, 'error': f'Error interno: {str(e)}'}, status=500)
+
+@requiere_token_api
+def api_estado_pedido(request, numero_orden):
+    """
+    Consulta el estado de un pedido.
+    GET /ventas/api/publica/pedidos/<numero_orden>/estado/
+    """
+    try:
+        pedido = PedidoOnline.objects.get(numero_orden=numero_orden)
+        return JsonResponse({
+            'success': True,
+            'numero_orden': pedido.numero_orden,
+            'estado': pedido.estado,
+            'estado_display': pedido.get_estado_display(),
+            'estado_pago': pedido.estado_pago,
+            'numero_guia': pedido.numero_guia or '',
+            'fecha_pedido': timezone.localtime(pedido.fecha_pedido).strftime('%d/%m/%Y %H:%M'),
+        })
+    except PedidoOnline.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Pedido no encontrado'}, status=404)
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  PANEL ADMIN — gestión de pedidos online
+# ──────────────────────────────────────────────────────────────────────
+
+@login_required
+def lista_pedidos_online(request):
+    """Panel con todos los pedidos online"""
+    estado = request.GET.get('estado', '')
+    metodo_pago = request.GET.get('metodo_pago', '')
+    busqueda = request.GET.get('q', '').strip()
+
+    pedidos = PedidoOnline.objects.all().prefetch_related('detalles')
+
+    if estado:
+        pedidos = pedidos.filter(estado=estado)
+    if metodo_pago:
+        pedidos = pedidos.filter(metodo_pago=metodo_pago)
+    if busqueda:
+        from django.db.models import Q
+        pedidos = pedidos.filter(
+            Q(numero_orden__icontains=busqueda) |
+            Q(nombres_comprador__icontains=busqueda) |
+            Q(apellidos_comprador__icontains=busqueda) |
+            Q(cedula_comprador__icontains=busqueda) |
+            Q(telefono_comprador__icontains=busqueda)
+        )
+
+    pedidos = pedidos.order_by('-fecha_pedido')
+
+    # Estadísticas rápidas
+    from django.db.models import Sum, Count
+    stats = {
+        'pendientes': PedidoOnline.objects.filter(estado='PENDIENTE').count(),
+        'confirmados': PedidoOnline.objects.filter(estado='CONFIRMADO').count(),
+        'despachados': PedidoOnline.objects.filter(estado='DESPACHADO').count(),
+        'entregados_hoy': PedidoOnline.objects.filter(
+            estado='ENTREGADO',
+            fecha_entrega__date=timezone.localdate()
+        ).count(),
+        'ingresos_hoy': PedidoOnline.objects.filter(
+            estado__in=['CONFIRMADO', 'PREPARANDO', 'DESPACHADO', 'ENTREGADO'],
+            fecha_pedido__date=timezone.localdate()
+        ).aggregate(total=Sum('total'))['total'] or Decimal('0.00'),
+    }
+
+    paginator = Paginator(pedidos, 20)
+    page = request.GET.get('page', 1)
+    pedidos_paginados = paginator.get_page(page)
+
+    return render(request, 'ventas/pedidos_online/lista.html', {
+        'active_page': 'ventas',
+        'active_sub': 'pedidos_online',
+        'pedidos': pedidos_paginados,
+        'stats': stats,
+        'estado_filtro': estado,
+        'metodo_pago_filtro': metodo_pago,
+        'busqueda': busqueda,
+        'estados': PedidoOnline.ESTADO_CHOICES,
+        'metodos_pago': PedidoOnline.METODO_PAGO_CHOICES,
+    })
+
+
+@login_required
+def detalle_pedido_online(request, pedido_id):
+    """Detalle de un pedido online"""
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    detalles = pedido.detalles.select_related('producto')
+
+    # Construir URL de WhatsApp apuntando al número del CLIENTE
+    whatsapp_url = None
+    if pedido.telefono_comprador:
+        import urllib.parse
+
+        # Limpiar el número: dejar solo dígitos
+        telefono = ''.join(filter(str.isdigit, pedido.telefono_comprador))
+
+        # Convertir a formato internacional Ecuador
+        # 0991234567 (10 dígitos con 0) → 593991234567
+        if telefono.startswith('0') and len(telefono) == 10:
+            telefono = '593' + telefono[1:]
+        # 991234567 (9 dígitos sin 0) → 593991234567
+        elif len(telefono) == 9:
+            telefono = '593' + telefono
+        # Si ya empieza con 593, dejarlo igual
+
+        mensaje = (
+            f"Hola {pedido.nombres_comprador}, le contactamos desde *Vpmotos* "
+            f"en relación a su pedido *#{pedido.numero_orden}* "
+            f"por un total de *${pedido.total:.2f}*. ¿En qué le podemos ayudar?"
+        )
+        whatsapp_url = f"https://wa.me/{telefono}?text={urllib.parse.quote(mensaje)}"
+
+    return render(request, 'ventas/pedidos_online/detalle.html', {
+        'active_page': 'ventas',
+        'pedido': pedido,
+        'detalles': detalles,
+        'whatsapp_url': whatsapp_url,
+    })
+
+
+@login_required
+@require_POST
+def confirmar_pedido_online(request, pedido_id):
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    if pedido.estado == 'PENDIENTE':
+        pedido.confirmar()
+        messages.success(request, f'Pedido #{pedido.numero_orden} confirmado.')
+    else:
+        messages.error(request, 'El pedido no está en estado pendiente.')
+    return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+
+@login_required
+@require_POST
+def despachar_pedido_online(request, pedido_id):
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    numero_guia = request.POST.get('numero_guia', '')
+    if pedido.estado in ('CONFIRMADO', 'PREPARANDO'):
+        pedido.despachar(numero_guia=numero_guia or None)
+        messages.success(request, f'Pedido #{pedido.numero_orden} despachado.')
+    else:
+        messages.error(request, 'El pedido no está listo para despachar.')
+    return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+
+@login_required
+@require_POST
+def entregar_pedido_online(request, pedido_id):
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    if pedido.estado == 'DESPACHADO':
+        pedido.entregar()
+        messages.success(request, f'Pedido #{pedido.numero_orden} marcado como entregado.')
+    else:
+        messages.error(request, 'El pedido no está despachado.')
+    return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+
+@login_required
+@require_POST
+def cancelar_pedido_online(request, pedido_id):
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+    if pedido.cancelar():
+        messages.success(request, f'Pedido #{pedido.numero_orden} cancelado. Stock revertido.')
+    else:
+        messages.error(request, 'No se puede cancelar este pedido.')
+    return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def procesar_venta_desde_pedido(request, pedido_id):
+    """
+    Convierte un pedido online en una Venta real del POS.
+    Se usa cuando el cliente paga en tienda (RETIRO) o se confirma el pago.
+    """
+    pedido = get_object_or_404(PedidoOnline, pk=pedido_id)
+
+    if pedido.venta:
+        messages.warning(request, 'Este pedido ya tiene una venta asociada.')
+        return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+    if pedido.estado == 'CANCELADO':
+        messages.error(request, 'No se puede procesar un pedido cancelado.')
+        return redirect('ventas:detalle_pedido_online', pedido_id=pedido.id)
+
+    # Obtener o crear cliente
+    cliente = pedido.cliente or Cliente.get_consumidor_final()
+
+    # Mapear método de pago al formato del POS
+    tipo_pago_map = {
+        'PAYPHONE':       'TARJETA',
+        'TRANSFERENCIA':  'TRANSFERENCIA',
+        'CONTRA_ENTREGA': 'EFECTIVO',
+    }
+    tipo_pago = tipo_pago_map.get(pedido.metodo_pago, 'EFECTIVO')
+
+    # Crear venta
+    venta = Venta.objects.create(
+        cliente=cliente,
+        usuario=request.user,
+        subtotal=pedido.subtotal,
+        iva=Decimal('0.00'),
+        descuento=pedido.descuento,
+        total=pedido.total,
+        tipo_pago=tipo_pago,
+        observaciones=f'Pedido online #{pedido.numero_orden}',
+    )
+
+    # Crear detalles de venta (el stock ya fue descontado al crear el pedido)
+    for detalle in pedido.detalles.all():
+        DetalleVenta.objects.create(
+            venta=venta,
+            producto=detalle.producto,
+            cantidad=detalle.cantidad,
+            precio_unitario=detalle.precio_unitario,
+            subtotal=detalle.subtotal,
+            iva_porcentaje=Decimal('0.00'),
+            iva=Decimal('0.00'),
+            descuento=detalle.descuento,
+            total=detalle.total,
+        )
+
+    # Vincular pedido con venta
+    pedido.venta = venta
+    pedido.estado_pago = 'PAGADO'
+    if pedido.estado not in ('DESPACHADO', 'ENTREGADO'):
+        pedido.estado = 'CONFIRMADO'
+        pedido.fecha_confirmacion = timezone.now()
+    pedido.save()
+
+    messages.success(request, f'Venta {venta.numero_factura} creada desde pedido #{pedido.numero_orden}.')
+    return redirect('ventas:detalle_venta', venta_id=venta.id)

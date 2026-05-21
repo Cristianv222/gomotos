@@ -12,6 +12,10 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Agregar directorio apps al sys.path para simplificar importaciones
+import sys
+sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
+
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-24ps2o^$&m@47b$evbyo5#&by5+y_^fd4-p761zv@h#niikhtn')
 
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
@@ -73,7 +77,6 @@ INSTALLED_APPS = [
     'inventario.apps.InventarioConfig',
     'clientes.apps.ClientesConfig',
     'ventas.apps.VentasConfig',
-    'taller.apps.TallerConfig',
     'compras.apps.ComprasConfig',
     'reportes.apps.ReportesConfig',
     'hardware_integration.apps.HardwareIntegrationConfig',
@@ -205,10 +208,10 @@ AUTH_USER_MODEL = 'usuarios.Usuario'
 # VPMOTOS CONFIGURATION
 # ============================================================
 VPMOTOS_SETTINGS = {
-    'COMPANY_NAME': os.environ.get('COMPANY_NAME', 'FULL MOTOS NICOLAS'),
+    'COMPANY_NAME': os.environ.get('COMPANY_NAME', 'GO MOTOS'),
     'COMPANY_ADDRESS': os.environ.get('COMPANY_ADDRESS', 'Ecuador Pichincha Cayambe Panamericana E35'),
     'COMPANY_PHONE': os.environ.get('COMPANY_PHONE', '0961278095'),
-    'COMPANY_EMAIL': os.environ.get('COMPANY_EMAIL', 'info@fullmotosnicolas.com'),
+    'COMPANY_EMAIL': os.environ.get('COMPANY_EMAIL', 'info@gomotos.com'),
     'COMPANY_TAX_ID': os.environ.get('COMPANY_TAX_ID', '0401234567001'),
     'IVA_PERCENTAGE': float(os.environ.get('IVA_PERCENTAGE', '15.0')),
     'DEFAULT_CURRENCY': os.environ.get('DEFAULT_CURRENCY', 'USD'),

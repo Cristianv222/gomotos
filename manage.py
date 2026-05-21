@@ -6,6 +6,13 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    # Agregar directorio apps al sys.path
+    import sys
+    import os
+    from pathlib import Path
+    base_dir = Path(__file__).resolve().parent
+    sys.path.insert(0, os.path.join(base_dir, 'apps'))
+
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'vpmotos.settings')
     try:
         from django.core.management import execute_from_command_line

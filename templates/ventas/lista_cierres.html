@@ -25,7 +25,7 @@
                             <th>Fecha</th>
                             <th>Usuario</th>
                             <th class="text-end">Total Productos</th>
-                            <th class="text-end">Total Servicios</th>
+
                             <th class="text-end">Total General</th>
                             <th>Fecha/Hora</th>
                         </tr>
@@ -36,13 +36,13 @@
                             <td>{{ cierre.fecha|date:"d/m/Y" }}</td>
                             <td>{{ cierre.usuario.nombre }} {{ cierre.usuario.apellido }}</td>
                             <td class="text-end">${{ cierre.total_productos|floatformat:2 }}</td>
-                            <td class="text-end">${{ cierre.total_servicios|floatformat:2 }}</td>
+
                             <td class="text-end">${{ cierre.total_ventas|floatformat:2 }}</td>
                             <td>{{ cierre.fecha_hora|date:"d/m/Y H:i" }}</td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="6" class="text-center py-4">No hay cierres de caja registrados</td>
+                            <td colspan="5" class="text-center py-4">No hay cierres de caja registrados</td>
                         </tr>
                         {% endfor %}
                     </tbody>

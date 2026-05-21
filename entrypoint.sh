@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Iniciando Taller Nicolas - MODO PRODUCCIÓN"
+echo "🚀 Iniciando GO MOTOS"
 
 # 1. Esperar a que la base de datos esté lista
 echo "⏳ Esperando a que la base de datos esté lista..."
@@ -34,7 +34,7 @@ if not Sucursal.objects.exists():
     print("Creando sucursal principal (Matriz)...")
     matriz = Sucursal.objects.create(
         codigo='MATRIZ',
-        nombre='Full Motos Nicolas - Matriz',
+        nombre='GO MOTOS - Matriz',
         nombre_corto='Matriz',
         direccion='Cayambe, Ecuador',
         ciudad='Cayambe',
@@ -83,9 +83,9 @@ else:
 EOF
 
 # 5. Cargar datos iniciales (fixtures)
-if [ -f "/app/ventas/fixtures/initial_data.json" ]; then
+if [ -f "/app/apps/ventas/fixtures/initial_data.json" ]; then
     echo "📥 Cargando datos iniciales de aplicación..."
-    python manage.py loaddata /app/ventas/fixtures/initial_data.json || echo "⚠️ Datos ya cargados o error menor en loaddata"
+    python manage.py loaddata /app/apps/ventas/fixtures/initial_data.json || echo "⚠️ Datos ya cargados o error menor en loaddata"
 fi
 
 echo "🔒 Iniciando servidor Daphne (ASGI) en puerto 8000..."

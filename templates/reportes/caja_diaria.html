@@ -177,7 +177,7 @@
     {% endwith %}
 
     <!-- ── TOTALES ───────────────────────────────────────────────── -->
-    <div class="row g-3 mb-4">
+    <div class="row g-3 mb-4 justify-content-center">
         <div class="col-6 col-lg-2">
             <div class="rp-stat">
                 <div class="rp-stat-icon blue"><i class="fas fa-play-circle"></i></div>
@@ -200,13 +200,7 @@
                 <div class="rp-stat-label">Productos</div>
             </div>
         </div>
-        <div class="col-6 col-lg-2">
-            <div class="rp-stat">
-                <div class="rp-stat-icon blue"><i class="fas fa-tools"></i></div>
-                <div class="rp-stat-val">${{ cierre.total_ventas_servicios|floatformat:2 }}</div>
-                <div class="rp-stat-label">Servicios POS</div>
-            </div>
-        </div>
+
         {% if online_disponible %}
         <div class="col-6 col-lg-2">
             <div class="rp-stat">

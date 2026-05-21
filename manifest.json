@@ -1,13 +1,13 @@
 {
-    "name": "OPENMOTORS",
-    "short_name": "OpenMotors",
+    "name": "GO MOTOS",
+    "short_name": "GoMotos",
     "description": "Sistema de Gestión Automotriz — Inventario, Ventas, Taller y Clientes",
     "start_url": "/",
     "scope": "/",
     "display": "standalone",
     "orientation": "any",
     "background_color": "#080809",
-    "theme_color": "#4361ee",
+    "theme_color": "#ff6f00",
     "lang": "es",
     "categories": ["business", "productivity"],
     "icons": [
@@ -54,14 +54,14 @@
             "sizes": "1280x800",
             "type": "image/png",
             "form_factor": "wide",
-            "label": "Dashboard OPENMOTORS"
+            "label": "Dashboard GO MOTOS"
         },
         {
             "src": "/static/img/screenshot-mobile.png",
             "sizes": "390x844",
             "type": "image/png",
             "form_factor": "narrow",
-            "label": "Dashboard OPENMOTORS móvil"
+            "label": "Dashboard GO MOTOS móvil"
         }
     ]
 }
