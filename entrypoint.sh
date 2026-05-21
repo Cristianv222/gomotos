@@ -49,7 +49,7 @@ else:
     print(f"ℹ️ Sucursal Matriz ya existe: {matriz.nombre if matriz else 'No marcada como principal'}")
 
 # --- Asegurar Dominio ---
-primary_domain = os.environ.get('PRIMARY_DOMAIN', 'full-motos-nicolas.valktek.com')
+primary_domain = os.environ.get('PRIMARY_DOMAIN', 'gomotos.valktek.com')
 if matriz:
     obj, created = DominioSucursal.objects.get_or_create(
         domain=primary_domain,

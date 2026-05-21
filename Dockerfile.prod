@@ -33,10 +33,10 @@ RUN pip install --user --no-warn-script-location \
 FROM python:3.11-slim-bullseye AS runtime
 
 # Metadatos
-LABEL maintainer="AutoLujos Team <info@autolujos.com>" \
-      description="Sistema de Inventario AutoLujos - Producción" \
+LABEL maintainer="GO MOTOS Team <info@gomotos.com>" \
+      description="Sistema de Inventario GO MOTOS - Producción" \
       version="1.0.0" \
-      org.opencontainers.image.vendor="FronteraTech"
+      org.opencontainers.image.vendor="GO MOTOS"
 
 # Variables de entorno optimizadas
 ENV PYTHONDONTWRITEBYTECODE=1 \
